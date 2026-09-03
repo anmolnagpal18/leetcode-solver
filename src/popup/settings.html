@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Settings – LeetCode Companion</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary:    #030712;
+      --bg-secondary:  #0b0f19;
+      --bg-card:       rgba(17, 24, 39, 0.7);
+      --border:        rgba(255, 255, 255, 0.06);
+      --border-hover:  rgba(99, 102, 241, 0.35);
+      --accent:        #6366f1;
+      --accent-hover:  #8b5cf6;
+      --accent-glow:   rgba(99, 102, 241, 0.15);
+      --green:         #10b981;
+      --yellow:        #fbbf24;
+      --red:           #f43f5e;
+      --text-primary:  #ffffff;
+      --text-secondary:#9ca3af;
+      --text-muted:    #6b7280;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: radial-gradient(circle at 50% 0%, #111827 0%, var(--bg-primary) 70%);
+      color: var(--text-primary);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    .container { max-width: 600px; margin: 0 auto; padding: 50px 24px; }
+
+    /* ── Header ─────────────────────────────────── */
+    .page-header {
+      display: flex; align-items: center; gap: 16px;
+      margin-bottom: 40px;
+      background: rgba(255, 255, 255, 0.02);
+      padding: 16px 20px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      backdrop-filter: blur(10px);
+    }
+    .logo-container {
+      width: 46px; height: 46px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .page-header h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+    .page-header p  { font-size: 13px; color: var(--text-secondary); margin-top: 1px; }
+
+    /* ── Card ────────────────────────────────────── */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 28px;
+      margin-bottom: 24px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 10px 30px -10px rgba(0,0,0,0.7);
+      transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+    .card:hover {
+      border-color: rgba(99, 102, 241, 0.2);
+      box-shadow: 0 12px 35px -8px rgba(0,0,0,0.8), 0 0 20px rgba(99, 102, 241, 0.05);
+    }
+    .card-title {
+      font-size: 13px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 1px; color: var(--text-secondary);
+      margin-bottom: 24px;
+      display: flex; align-items: center; gap: 8px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      padding-bottom: 12px;
+    }
+
+    /* ── Form ────────────────────────────────────── */
+    .form-group { margin-bottom: 20px; }
+    .form-group:last-child { margin-bottom: 0; }
+    label {
+      display: block;
+      font-size: 12.5px; font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 8px;
+    }
+    .input-wrap { position: relative; }
+    input[type="text"], input[type="password"], input[type="url"] {
+      width: 100%;
+      background: rgba(17, 24, 39, 0.6);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 42px 12px 16px;
+      font-size: 13.5px;
+      color: var(--text-primary);
+      font-family: 'Inter', sans-serif;
+      outline: none;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    input:focus {
+      border-color: var(--accent);
+      background: rgba(17, 24, 39, 0.8);
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25), 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+    .toggle-vis {
+      position: absolute; right: 12px; top: 50%;
+      transform: translateY(-50%);
+      background: none; border: none;
+      color: var(--text-muted); cursor: pointer;
+      font-size: 16px; padding: 4px;
+      transition: color 0.2s;
+    }
+    .toggle-vis:hover { color: var(--text-primary); }
+    .hint {
+      font-size: 11px; color: var(--text-muted);
+      margin-top: 6px;
+      line-height: 1.4;
+    }
+    .hint a { color: var(--accent); text-decoration: none; font-weight: 500; }
+    .hint a:hover { text-decoration: underline; }
+
+    /* ── Buttons ─────────────────────────────────── */
+    .btn-row { display: flex; justify-content: space-between; align-items: center; margin-top: 32px; gap: 16px; }
+    .btn-group { display: flex; gap: 12px; }
+    .btn {
+      padding: 12px 24px; border-radius: 12px;
+      font-size: 13.5px; font-weight: 600; cursor: pointer;
+      border: none; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+      color: #fff;
+      box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+    }
+    .btn-primary:hover {
+      box-shadow: 0 6px 20px rgba(99, 102, 241, 0.6);
+      filter: brightness(1.08);
+    }
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border);
+      color: var(--text-primary);
+    }
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: var(--border-hover);
+    }
+    .btn-danger {
+      background: rgba(244, 63, 94, 0.08); border: 1px solid rgba(244, 63, 94, 0.2);
+      color: var(--red);
+    }
+    .btn-danger:hover {
+      background: rgba(244, 63, 94, 0.15);
+      border-color: rgba(244, 63, 94, 0.35);
+    }
+
+    /* ── Toast ───────────────────────────────────── */
+    #toast {
+      position: fixed; bottom: 32px; left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: rgba(17, 24, 39, 0.95); border: 1px solid var(--border);
+      border-radius: 12px; padding: 12px 24px;
+      font-size: 13.5px; color: var(--text-primary);
+      opacity: 0; pointer-events: none;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      white-space: nowrap;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+      backdrop-filter: blur(10px);
+      z-index: 10000;
+    }
+    #toast.show {
+      opacity: 1; transform: translateX(-50%) translateY(0);
+    }
+    #toast.success { border-color: var(--green); color: var(--green); }
+    #toast.error   { border-color: var(--red);   color: var(--red); }
+
+    /* ── Status Badge ────────────────────────────── */
+    .status-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px;
+      margin-left: auto; text-transform: uppercase; letter-spacing: 0.5px;
+      border: 1px solid transparent;
+    }
+    .status-badge.ok  { background: rgba(16, 185, 129, 0.08); color: var(--green); border-color: rgba(16, 185, 129, 0.2); }
+    .status-badge.bad { background: rgba(244, 63, 94, 0.08); color: var(--red); border-color: rgba(244, 63, 94, 0.2); }
+
+    /* ── Toggle Switch ───────────────────────────── */
+    .toggle-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 4px 0;
+    }
+    .toggle-row label { margin: 0; cursor: pointer; }
+    .switch {
+      position: relative; display: inline-block;
+      width: 44px; height: 26px; flex-shrink: 0;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; cursor: pointer;
+      inset: 0; background: rgba(255,255,255,0.08);
+      border: 1px solid var(--border);
+      border-radius: 26px; transition: .3s;
+    }
+    .slider::before {
+      content: ''; position: absolute;
+      height: 18px; width: 18px; left: 3px; bottom: 3px;
+      background: white; border-radius: 50%;
+      transition: .3s;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    }
+    input:checked + .slider { background: var(--accent); border-color: var(--accent); }
+    input:checked + .slider::before { transform: translateX(18px); }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <div class="page-header">
+      <div class="logo-container">
+        <img id="settings-logo" src="" style="width: 44px; height: 44px; object-fit: contain;" alt="logo" />
+      </div>
+      <div>
+        <h1>Settings</h1>
+        <p>Configure your LeetCode Companion</p>
+      </div>
+    </div>
+
+    <!-- Groq AI -->
+    <div class="card">
+      <div class="card-title">
+        ⚡ Groq AI (Free)
+        <span class="status-badge bad" id="grok-badge">Not set</span>
+      </div>
+      <div class="form-group">
+        <label for="grok-key">API Key</label>
+        <div class="input-wrap">
+          <input type="password" id="grok-key" placeholder="gsk_…" autocomplete="off" />
+          <button class="toggle-vis" data-target="grok-key" title="Toggle visibility">👁</button>
+        </div>
+        <p class="hint">
+          Get your <strong>100% free</strong> key at
+          <a href="https://console.groq.com/keys" target="_blank">console.groq.com</a>
+          &nbsp;–&nbsp; No billing needed • Uses <strong>llama-3.3-70b</strong>
+        </p>
+      </div>
+      <div style="margin-top:20px;">
+        <button class="btn btn-secondary" id="btn-test-grok" style="width:100%;">🔬 Test Groq API Key</button>
+      </div>
+    </div>
+
+    <!-- GitHub -->
+    <div class="card">
+      <div class="card-title">
+        ⬆ GitHub Sync
+        <span class="status-badge bad" id="github-badge">Not set</span>
+      </div>
+      <div class="form-group">
+        <label for="github-token">Personal Access Token</label>
+        <div class="input-wrap">
+          <input type="password" id="github-token" placeholder="ghp_…" autocomplete="off" />
+          <button class="toggle-vis" data-target="github-token" title="Toggle visibility">👁</button>
+        </div>
+        <p class="hint">Create a token with <strong>repo</strong> scope at <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a></p>
+      </div>
+      <div class="form-group">
+        <label for="github-repo">Repository (owner/repo)</label>
+        <div class="input-wrap">
+          <input type="text" id="github-repo" placeholder="username/leetcode-solutions" />
+        </div>
+        <p class="hint">The repo must already exist. E.g. <code>john/my-leetcode</code></p>
+      </div>
+      <div class="form-group">
+        <label for="github-branch">Branch</label>
+        <div class="input-wrap">
+          <input type="text" id="github-branch" placeholder="main" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="github-folder">Folder Path</label>
+        <div class="input-wrap">
+          <input type="text" id="github-folder" placeholder="solutions/" />
+        </div>
+        <p class="hint">Leave empty to place files at the repo root.</p>
+      </div>
+    </div>
+
+    <!-- Telegram Integration -->
+    <div class="card">
+      <div class="card-title">
+        📢 Telegram Integration
+        <span class="status-badge bad" id="telegram-badge">Not set</span>
+      </div>
+      <div class="form-group">
+        <div class="toggle-row">
+          <label for="telegram-enabled">Enable Telegram Alerts & Bot Commands</label>
+          <label class="switch">
+            <input type="checkbox" id="telegram-enabled" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <p class="hint" style="margin-top:6px;">Allow background notifications to be sent to your Telegram, and poll for commands (/status, /today, /solution, /solve).</p>
+      </div>
+      <div class="form-group">
+        <label for="telegram-token">Telegram Bot Token</label>
+        <div class="input-wrap">
+          <input type="password" id="telegram-token" placeholder="123456789:ABCdefGhI..." autocomplete="off" />
+          <button class="toggle-vis" data-target="telegram-token" title="Toggle visibility">👁</button>
+        </div>
+        <p class="hint">Create a bot using <a href="https://t.me/BotFather" target="_blank">@BotFather</a> on Telegram and copy the API token.</p>
+      </div>
+      <div class="form-group">
+        <label for="telegram-chatid">Telegram Chat ID</label>
+        <div class="input-wrap">
+          <input type="text" id="telegram-chatid" placeholder="987654321" />
+        </div>
+        <p class="hint">Send a message to your bot and then fetch your chat ID using <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a> or similar.</p>
+      </div>
+      <div class="form-group" style="margin-top:14px; padding-top:14px; border-top:1px dashed var(--border);">
+        <div class="toggle-row">
+          <label for="telegram-cloud-mode">Cloud Bot 24/7 Mode</label>
+          <label class="switch">
+            <input type="checkbox" id="telegram-cloud-mode" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div style="margin-top:12px; padding:10px 12px; background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.25); border-radius:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <strong style="font-size:12px; color:var(--text-primary); display:block;">LeetCode Account Link</strong>
+              <span style="font-size:10.5px; color:var(--text-muted);" id="cloud-auth-status">Offline / Not synced</span>
+            </div>
+            <button class="btn btn-secondary" id="btn-sync-cloud-auth" style="padding:6px 12px; font-size:11px; margin:0; border-color:var(--accent);">🔗 Sync Account</button>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:20px;">
+        <button class="btn btn-secondary" id="btn-test-telegram" style="width:100%;">💬 Test Telegram Connection</button>
+      </div>
+    </div>
+
+    <!-- Auto-Sync Toggle -->
+    <div class="card">
+      <div class="card-title">⚡ Behaviour</div>
+      <div class="form-group">
+        <div class="toggle-row">
+          <label for="auto-sync">Auto-sync to GitHub on Accepted</label>
+          <label class="switch">
+            <input type="checkbox" id="auto-sync" />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <p class="hint" style="margin-top:6px;">When enabled, your solution is automatically pushed to GitHub the moment LeetCode shows ✅ Accepted.</p>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="btn-row">
+      <div class="btn-group">
+        <button class="btn btn-primary" id="btn-save">💾 Save Settings</button>
+        <button class="btn btn-secondary" id="btn-test">🔗 Test GitHub</button>
+      </div>
+      <button class="btn btn-danger" id="btn-clear">🗑 Clear All</button>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script src="settings.js"></script>
+</body>
+</html>

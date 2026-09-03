@@ -1,0 +1,56 @@
+{
+  "manifest_version": 3,
+  "name": "LeetCode Companion",
+  "version": "1.0.0",
+  "description": "LeetCode Companion – auto-sync solutions to GitHub and get AI-powered hints",
+  "permissions": [
+    "storage",
+    "alarms",
+    "cookies"
+  ],
+  "host_permissions": [
+    "https://leetcode.com/*",
+    "https://api.github.com/*",
+    "https://api.groq.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://leetcode.com/*"],
+      "js": ["src/content/detector.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://leetcode.com/problems/*"],
+      "js": ["src/content/injector.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "16": "assets/icons/icon16.png",
+      "48": "assets/icons/icon48.png",
+      "128": "assets/icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "assets/icons/icon16.png",
+    "48": "assets/icons/icon48.png",
+    "128": "assets/icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/content/editor-injector.js",
+        "assets/icons/icon16.png",
+        "assets/icons/icon48.png",
+        "assets/icons/icon128.png"
+      ],
+      "matches": ["https://leetcode.com/*"]
+    }
+  ]
+}

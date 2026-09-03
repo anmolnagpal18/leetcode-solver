@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LeetCode Companion</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary:    #090a0f;
+      --bg-secondary:  #10121a;
+      --bg-card:       #161926;
+      --border:        #23283d;
+      --border-hover:  #393e5d;
+      --accent:        #818cf8;
+      --accent-hover:  #a5b4fc;
+      --accent-glow:   rgba(99, 102, 241, 0.15);
+      --green:         #34d399;
+      --yellow:        #fbbf24;
+      --red:           #f87171;
+      --text-primary:  #ffffff;
+      --text-secondary:#cdd1e4;
+      --text-muted:    #8a92b2;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: radial-gradient(circle at 50% 0%, #151828 0%, var(--bg-primary) 75%);
+      color: var(--text-primary);
+      width: 380px;
+      min-height: 490px;
+      overflow-x: hidden;
+    }
+
+    /* ── Header ─────────────────────────────────── */
+    .header {
+      background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 18px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      position: relative;
+      overflow: hidden;
+    }
+    .header::before {
+      content: '';
+      position: absolute;
+      top: -30px; right: -30px;
+      width: 120px; height: 120px;
+      background: var(--accent-glow);
+      border-radius: 50%;
+      filter: blur(40px);
+      pointer-events: none;
+    }
+    .logo-container {
+      width: 36px; height: 36px;
+      background: linear-gradient(135deg, #6366f1, #a855f7);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.3);
+      flex-shrink: 0;
+    }
+    .header-text h1 {
+      font-size: 14.5px; font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: -0.2px;
+    }
+    .header-text p { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+    .header-actions { margin-left: auto; display: flex; gap: 8px; }
+    
+    .icon-btn {
+      width: 32px; height: 32px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      color: var(--text-secondary);
+    }
+    .icon-btn:hover {
+      border-color: rgba(129, 140, 248, 0.35);
+      color: var(--text-primary);
+      background: rgba(129, 140, 248, 0.1);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(129, 140, 248, 0.15);
+    }
+
+    /* ── Status Banner ───────────────────────────── */
+    #status-banner {
+      margin: 14px 18px 0;
+      padding: 12px 16px;
+      background: linear-gradient(135deg, rgba(22, 25, 38, 0.7) 0%, rgba(16, 18, 26, 0.8) 100%);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 14px;
+      display: flex; align-items: center; gap: 12px;
+      font-size: 12.5px;
+      backdrop-filter: blur(10px);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+      transition: all 0.3s ease;
+    }
+    #status-banner.active {
+      border-color: rgba(52, 211, 153, 0.35);
+      background: linear-gradient(135deg, rgba(52, 211, 153, 0.04) 0%, rgba(16, 18, 26, 0.8) 100%);
+      box-shadow: 0 4px 16px rgba(52, 211, 153, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.02);
+    }
+    #status-banner.inactive {
+      border-color: rgba(255, 255, 255, 0.05);
+    }
+    #status-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 270px;
+      display: block;
+    }
+    
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-dot.green  { background: var(--green); box-shadow: 0 0 10px var(--green); animation: pulse 2s infinite; }
+    .status-dot.grey   { background: var(--text-muted); }
+    @keyframes pulse {
+      0%,100% { opacity: 1; transform: scale(1); }
+      50%      { opacity: .5; transform: scale(1.25); }
+    }
+
+    /* ── Stats Grid ──────────────────────────────── */
+    .stats-grid {
+      display: grid; grid-template-columns: repeat(2,1fr);
+      gap: 10px; margin: 14px 18px 0;
+    }
+    .stat-card {
+      background: linear-gradient(135deg, rgba(22, 25, 38, 0.7) 0%, rgba(16, 18, 26, 0.8) 100%);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      padding: 14px 10px;
+      text-align: center;
+      backdrop-filter: blur(10px);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .stat-card:hover {
+      transform: translateY(-2.5px);
+      border-color: rgba(129, 140, 248, 0.35);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 12px rgba(129, 140, 248, 0.06);
+    }
+    .stat-card:last-child {
+      background: linear-gradient(135deg, rgba(129, 140, 248, 0.12) 0%, rgba(16, 18, 26, 0.8) 100%);
+      border-color: rgba(129, 140, 248, 0.22);
+    }
+    .stat-card:last-child:hover {
+      border-color: rgba(129, 140, 248, 0.55);
+      box-shadow: 0 8px 24px rgba(129, 140, 248, 0.15), 0 0 16px rgba(129, 140, 248, 0.1);
+    }
+    .stat-value { font-size: 24px; font-weight: 700; line-height: 1; letter-spacing: -0.5px; }
+    .stat-value.easy   { color: var(--green); text-shadow: 0 0 10px rgba(52, 211, 153, 0.15); }
+    .stat-value.medium { color: var(--yellow); text-shadow: 0 0 10px rgba(251, 191, 36, 0.15); }
+    .stat-value.hard   { color: var(--red); text-shadow: 0 0 10px rgba(248, 113, 113, 0.15); }
+    .stat-value.streak { color: var(--accent); text-shadow: 0 0 10px rgba(129, 140, 248, 0.15); }
+    .stat-sub { font-size: 10px; color: var(--text-muted); margin-top: 3px; font-weight: 500; }
+    .stat-label { font-size: 9px; color: var(--text-muted); margin-top: 6px; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 600; }
+
+    /* ── Section ─────────────────────────────────── */
+    .section { margin: 16px 18px 0; }
+    .section-title {
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 1px; color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    /* ── Action Buttons ──────────────────────────── */
+    .action-list { display: flex; flex-direction: column; gap: 8px; }
+    .action-btn {
+      display: flex; align-items: center; gap: 12px;
+      background: linear-gradient(135deg, rgba(22, 25, 38, 0.6) 0%, rgba(16, 18, 26, 0.7) 100%);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      padding: 12px 14px;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      width: 100%;
+      text-align: left;
+      position: relative;
+      overflow: hidden;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.01);
+    }
+    .action-btn::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.04), transparent);
+      transform: translateX(-100%);
+      transition: transform 0.6s ease;
+    }
+    .action-btn:hover::after {
+      transform: translateX(100%);
+    }
+    .action-btn:hover {
+      border-color: rgba(129, 140, 248, 0.4);
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(16, 18, 26, 0.8) 100%);
+      transform: translateX(3px);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    }
+    .action-btn:active { transform: translateX(1px) scale(.99); }
+    
+    .action-icon {
+      width: 34px; height: 34px; border-radius: 9px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    .action-icon.purple { background: rgba(168, 85, 247, 0.12); color: var(--accent); transition: all 0.3s; }
+    .action-icon.green  { background: rgba(52, 211, 153, 0.12); color: var(--green); transition: all 0.3s; }
+    .action-icon.yellow { background: rgba(251, 191, 36, 0.12); color: var(--yellow); transition: all 0.3s; }
+    
+    .action-btn:hover .action-icon.purple {
+      background: rgba(168, 85, 247, 0.22);
+      filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.45));
+    }
+    .action-btn:hover .action-icon.green {
+      background: rgba(52, 211, 153, 0.22);
+      filter: drop-shadow(0 0 8px rgba(52, 211, 153, 0.45));
+    }
+    .action-btn:hover .action-icon.yellow {
+      background: rgba(251, 191, 36, 0.22);
+      filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.45));
+    }
+    
+    .action-text strong { display: block; font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
+    .action-text span   { display: block; font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+    .action-arrow { margin-left: auto; color: var(--text-muted); font-size: 14px; font-weight: 500; transition: transform 0.2s; }
+    .action-btn:hover .action-arrow { transform: translateX(2px); color: var(--accent-hover); }
+
+    /* ── Toggle Switch ────────────────────────────── */
+    .switch {
+      position: relative; display: inline-block;
+      width: 40px; height: 22px; flex-shrink: 0;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; cursor: pointer;
+      inset: 0; background: var(--border);
+      border-radius: 22px; transition: .3s;
+      border: 1px solid rgba(255,255,255,0.02);
+    }
+    .slider::before {
+      content: ''; position: absolute;
+      height: 14px; width: 14px; left: 3px; bottom: 3px;
+      background: white; border-radius: 50%; transition: .3s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    }
+    input:checked + .slider { background: linear-gradient(135deg, var(--accent) 0%, #4f46e5 100%); box-shadow: 0 0 10px rgba(129,140,248,0.4); }
+    input:checked + .slider::before { transform: translateX(18px); }
+
+    /* ── Automation Card ─────────────────────────── */
+    .automation-card {
+      background: linear-gradient(135deg, rgba(22, 25, 38, 0.6) 0%, rgba(16, 18, 26, 0.7) 100%);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 16px;
+      padding: 16px 18px;
+      backdrop-filter: blur(10px);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .automation-card.enabled {
+      border-color: rgba(129, 140, 248, 0.35);
+      background: linear-gradient(135deg, rgba(129, 140, 248, 0.04) 0%, rgba(16, 18, 26, 0.8) 100%);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.02);
+    }
+    .automation-header {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .automation-icon {
+      width: 32px; height: 32px; border-radius: 9px;
+      background: rgba(129,140,248,0.12);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; font-size: 16px;
+    }
+    .automation-title { flex: 1; }
+    .automation-title strong { display: block; font-size: 13px; font-weight: 600; color: var(--text-primary); }
+    .automation-title span { display: block; font-size: 10.5px; color: var(--text-muted); margin-top: 1px; }
+    .time-picker {
+      display: flex; align-items: center; gap: 6px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+    .time-picker-label {
+      font-size: 11px; color: var(--text-muted); font-weight: 500;
+      letter-spacing: 0.5px; white-space: nowrap;
+    }
+    .time-picker-controls { display: flex; align-items: center; gap: 5px; margin-left: auto; }
+    .time-select, .time-input {
+      background: rgba(9, 10, 15, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 6px 10px;
+      color: var(--text-primary);
+      font-size: 12px;
+      font-family: 'Inter', sans-serif;
+      font-weight: 600;
+      outline: none;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-align: center;
+    }
+    .time-select:hover, .time-input:hover {
+      border-color: rgba(129, 140, 248, 0.3);
+      background: rgba(9, 10, 15, 0.8);
+    }
+    .time-select:focus, .time-input:focus {
+      border-color: var(--accent);
+      background: rgba(9, 10, 15, 0.9);
+      box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.2);
+    }
+    .time-select { width: 54px; }
+    .time-input  { width: 44px; }
+    .time-ampm   { width: 52px; }
+    .time-colon  { color: var(--text-muted); font-weight: 700; font-size: 14px; line-height: 1; }
+
+    #automation-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px dashed var(--border);
+    }
+    .save-time-btn {
+      flex: 1;
+      background: linear-gradient(135deg, var(--accent) 0%, #4f46e5 100%);
+      border: none;
+      border-radius: 8px;
+      color: white;
+      font-size: 11.5px;
+      font-weight: 600;
+      padding: 8px 10px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      box-shadow: 0 2px 8px rgba(99, 102, 241, 0.2);
+    }
+    .save-time-btn:hover:not(:disabled) {
+      background: linear-gradient(135deg, var(--accent-hover) 0%, var(--accent) 100%);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+    }
+    .save-time-btn:active:not(:disabled) {
+      transform: translateY(0);
+    }
+    .save-time-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      box-shadow: none;
+      background: var(--border);
+    }
+    .save-time-btn.secondary {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      box-shadow: none;
+    }
+    .save-time-btn.secondary:hover:not(:disabled) {
+      border-color: var(--border-hover);
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text-primary);
+    }
+    
+    .time-picker, #automation-actions {
+      transition: opacity 0.25s ease;
+    }
+    .automation-card:not(.enabled) .time-picker,
+    .automation-card:not(.enabled) #automation-actions {
+      opacity: 0.35;
+      pointer-events: none;
+    }
+
+    /* ── Quick Search LeetCode Problem ───────────── */
+    .search-input-wrap {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      background: linear-gradient(135deg, rgba(22, 25, 38, 0.7) 0%, rgba(16, 18, 26, 0.8) 100%);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 6px 8px 6px 12px;
+      transition: all 0.25s ease;
+    }
+    .search-input-wrap:focus-within {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.15);
+    }
+    .search-input-wrap input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text-primary);
+      font-size: 12px;
+      font-family: inherit;
+      outline: none;
+    }
+    .search-input-wrap input::placeholder {
+      color: var(--text-muted);
+    }
+    .search-btn {
+      background: linear-gradient(135deg, var(--accent) 0%, #4f46e5 100%);
+      border: none;
+      color: white;
+      border-radius: 6px;
+      width: 26px;
+      height: 26px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 11px;
+      transition: transform 0.2s ease;
+    }
+    .search-btn:hover {
+      transform: scale(1.05);
+    }
+    .search-results-area {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .search-card {
+      background: linear-gradient(135deg, rgba(22, 25, 38, 0.7) 0%, rgba(16, 18, 26, 0.8) 100%);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .search-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .search-card-title {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .search-card-badge {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 10px;
+      text-transform: capitalize;
+    }
+    .search-card-badge.easy { background: rgba(52, 211, 153, 0.12); color: var(--green); }
+    .search-card-badge.medium { background: rgba(251, 191, 36, 0.12); color: var(--yellow); }
+    .search-card-badge.hard { background: rgba(248, 113, 113, 0.12); color: var(--red); }
+    .search-card-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 2px;
+    }
+    .search-action-btn {
+      flex: 1;
+      padding: 6px 4px;
+      font-size: 11px;
+      font-weight: 600;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      transition: all 0.2s ease;
+    }
+    .search-action-btn:hover {
+      background: rgba(129, 140, 248, 0.1);
+      border-color: rgba(129, 140, 248, 0.4);
+      color: var(--text-primary);
+    }
+    .search-action-btn.solve-now {
+      background: linear-gradient(135deg, rgba(129, 140, 248, 0.2) 0%, rgba(79, 70, 229, 0.2) 100%);
+      border-color: rgba(129, 140, 248, 0.4);
+      color: #a5b4fc;
+    }
+    .search-action-btn.solve-now:hover {
+      background: linear-gradient(135deg, var(--accent) 0%, #4f46e5 100%);
+      color: white;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Sleek custom scrollbar */
+    body::-webkit-scrollbar {
+      width: 6px;
+    }
+    body::-webkit-scrollbar-track {
+      background: var(--bg-primary);
+    }
+    body::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 10px;
+    }
+    body::-webkit-scrollbar-thumb:hover {
+      background: var(--border-hover);
+    }
+
+    /* ── Footer ──────────────────────────────────── */
+    .footer {
+      margin: 20px 18px 16px;
+      text-align: center;
+      font-size: 11px;
+      color: var(--text-muted);
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+    }
+    .footer a { color: var(--accent); text-decoration: none; font-weight: 500; }
+    .footer a:hover { text-decoration: underline; color: var(--accent-hover); }
+
+    /* ── Config warning ──────────────────────────── */
+    #config-warning {
+      margin: 14px 18px 0;
+      padding: 10px 14px;
+      background: rgba(251, 191, 36, 0.08);
+      border: 1px solid rgba(251, 191, 36, 0.3);
+      border-radius: 12px;
+      font-size: 12px;
+      color: var(--yellow);
+      display: none;
+      align-items: center;
+      gap: 10px;
+    }
+    #config-warning.show { display: flex; }
+    #config-warning a { color: var(--yellow); font-weight: 600; text-decoration: underline; }
+
+    /* ── Spinner ─────────────────────────────────── */
+    .spinner {
+      width: 14px; height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="logo-container" style="background: transparent; box-shadow: none;">
+      <img id="popup-logo" src="" style="width: 28px; height: 28px; object-fit: contain;" alt="logo" />
+    </div>
+    <div class="header-text">
+      <h1>LeetCode Companion</h1>
+      <p>GitHub sync • AI hints</p>
+    </div>
+    <div class="header-actions">
+      <button class="icon-btn" id="btn-toggle-sidebar" title="Open Companion Sidebar">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+          <line x1="9" y1="3" x2="9" y2="21"/>
+        </svg>
+      </button>
+      <button class="icon-btn" id="btn-refresh" title="Refresh stats">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+        </svg>
+      </button>
+      <button class="icon-btn" id="btn-settings" title="Settings">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Config Warning -->
+  <div id="config-warning">
+    <span>⚠️</span>
+    <span>Config incomplete. <a href="#" id="goto-settings">Open Settings</a></span>
+  </div>
+
+  <!-- Status Banner -->
+  <div id="status-banner" class="inactive">
+    <div class="status-dot grey" id="status-dot"></div>
+    <div>
+      <div id="status-text" style="font-weight:600; color: var(--text-primary);">Checking LeetCode tab…</div>
+      <div id="status-sub">Go to leetcode.com/problems/ to start</div>
+    </div>
+    <div class="spinner" id="status-spinner"></div>
+  </div>
+
+  <!-- Draggable Tip -->
+  <div style="margin: 12px 18px 0; padding: 10px 12px; background: rgba(129, 140, 248, 0.08); border: 1px dashed rgba(129, 140, 248, 0.25); border-radius: 12px; font-size: 11px; color: #a5b4fc; text-align: center; line-height: 1.45;">
+    💡 <strong>Tip:</strong> Want to drag the dashboard? Click the <strong>Sidebar icon</strong> in the header above to open a fully movable floating dashboard on the page!
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-value easy" id="stat-easy">0</div>
+      <div class="stat-label">Easy</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value medium" id="stat-medium">0</div>
+      <div class="stat-label">Medium</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value hard" id="stat-hard">0</div>
+      <div class="stat-label">Hard</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value streak" id="stat-streak">0</div>
+      <div class="stat-label">🔥 Streak</div>
+      <div class="stat-sub" id="streak-sub">Best: 0</div>
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div class="section">
+    <div class="section-title">Quick Actions</div>
+    <div class="action-list">
+      <button class="action-btn" id="btn-help-solve">
+        <div class="action-icon yellow">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </div>
+        <div class="action-text">
+          <strong>Help Me Solve</strong>
+          <span>Stuck? Get step-by-step solution & hints</span>
+        </div>
+        <span class="action-arrow">›</span>
+      </button>
+      <button class="action-btn" id="btn-sync">
+        <div class="action-icon green">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+          </svg>
+        </div>
+        <div class="action-text">
+          <strong>Sync to GitHub</strong>
+          <span>Push current solution to your repo</span>
+        </div>
+        <span class="action-arrow">›</span>
+      </button>
+      <button class="action-btn" id="btn-history">
+        <div class="action-icon purple">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+        <div class="action-text">
+          <strong>View GitHub History</strong>
+          <span>Browse all synced solutions</span>
+        </div>
+        <span class="action-arrow">›</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Quick Search LeetCode Problem -->
+  <div class="section">
+    <div class="section-title">🔎 Search LeetCode Problem</div>
+    <div class="search-input-wrap">
+      <input type="text" id="problem-search-input" placeholder="Enter number or problem name (e.g. 1, 874, Two Sum)..." autocomplete="off" />
+      <button class="search-btn" id="btn-search-problem" title="Search Problem">🔍</button>
+    </div>
+    <div id="search-results-area" class="search-results-area" style="display: none;"></div>
+  </div>
+
+  <!-- Auto-Solve Automation -->
+  <div class="section">
+    <div class="section-title">Streak Protection</div>
+    <div class="automation-card" id="automation-card">
+      <div class="automation-header">
+        <div class="automation-icon">⚡</div>
+        <div class="automation-title">
+          <strong>Auto-Solve Problem</strong>
+          <span>Auto-solve Daily Challenge to protect your streak</span>
+        </div>
+        <label class="switch" title="Enable Streak Protection">
+          <input type="checkbox" id="streak-protect" />
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="time-picker" id="time-picker">
+        <span class="time-picker-label">⏰ Trigger at</span>
+        <div class="time-picker-controls">
+          <select id="streak-hour" class="time-select" title="Hour">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+            <option value="9">9</option>
+            <option value="10" selected>10</option>
+            <option value="11">11</option>
+            <option value="12">12</option>
+          </select>
+          <span class="time-colon">:</span>
+          <input
+            type="text"
+            id="streak-minute"
+            class="time-input"
+            value="00"
+            maxlength="2"
+            placeholder="00"
+            title="Minute (0-59)"
+          />
+          <select id="streak-ampm" class="time-select time-ampm" title="AM / PM">
+            <option value="AM">AM</option>
+            <option value="PM" selected>PM</option>
+          </select>
+        </div>
+      </div>
+      <div class="automation-actions" id="automation-actions">
+        <button class="save-time-btn" id="btn-save-streak-time" title="Apply and Save trigger settings">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          Save Schedule
+        </button>
+        <button class="save-time-btn secondary" id="btn-test-auto-solve" title="Trigger Auto-Solve on today's daily challenge tab immediately">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+          Test Trigger
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    LeetCode Companion &nbsp;·&nbsp; <a href="#" id="footer-settings">Settings</a>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
