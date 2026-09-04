@@ -1,5 +1,0 @@
-# CSE476 CA1 Project 1 Requirements
-# The core agent runs on standard Python 3.8+ with ZERO external pip dependencies required.
-# If running the .ipynb notebook locally, install:
-notebook>=7.0.0
-ipykernel>=6.0.0
