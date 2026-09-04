@@ -4,7 +4,7 @@
 
   <br />
   <a href="https://git.io/typing-svg">
-    <img src="https://readme-typing-svg.demolab.com?font=Outfit&size=30&duration=4000&pause=3000&color=209ced&center=true&vCenter=true&width=800&height=70&lines=LeetCode+Solver+%E2%80%94+24%2F7+Autonomous+Companion" alt="LeetCode Solver — 24/7 Autonomous Companion" />
+    <img src="https://readme-typing-svg.demolab.com?font=Outfit&size=30&duration=4000&pause=3000&color=209ced&center=true&vCenter=true&width=800&height=70&lines=LeetCode+Solver+%E2%80%94+24%2F7+Autonomous+Companion;CSE476+Agentic+AI+CA1+Project" alt="LeetCode Solver — 24/7 Autonomous Companion" />
   </a>
   <br />
 
@@ -20,7 +20,7 @@
 
   <p>
     <a href="https://groq.com"><img src="https://img.shields.io/badge/AI_Engine-Groq_Grandmaster-orange?style=flat-square" alt="AI Engine: Groq" /></a>
-    <a href="#security--privacy"><img src="https://img.shields.io/badge/Security-Git--Ignored_Credentials-success?style=flat-square" alt="Security: Protected" /></a>
+    <a href="#-cse476-ca1-project-1-build-a-real-agent-submission"><img src="https://img.shields.io/badge/Course-CSE476_CA1_Agent-brightgreen?style=flat-square" alt="CSE476 CA1" /></a>
     <a href="#2-autonomous-self-healing-feedback-loop"><img src="https://img.shields.io/badge/Solver-Self--Healing_Auto--Retry-blueviolet?style=flat-square" alt="Self Healing Loop" /></a>
   </p>
 
@@ -35,6 +35,39 @@
 </div>
 
 <br />
+
+---
+
+## 🎓 CSE476 CA1 Project 1: Build a Real Agent (Submission Write-up)
+
+**Course:** CSE476 Agentic AI and Intelligent Automation  
+**Student Name:** Anmol Nagpal  
+**Submission Type:** Solo Submission | **Maximum Marks:** 30  
+**Demo Notebook:** [`demo.ipynb`](demo.ipynb) | **CLI Demo:** `python run_demo.py`
+
+> **The Core Rule: An Agent, Not a Chatbot.**  
+> *"A chatbot is a vending machine, one question in, one answer out. An agent is an intern: you give it a goal and it decides which tools to use, does several steps, remembers what it found, and comes back with a result."*
+
+### 📝 The Three Submission Paragraphs:
+
+**1. The Tools (`fetch_problem_spec` and `execute_code_sandbox`):**  
+Our agent operates two real functional tools to act on programming tasks rather than simply predicting text. The first tool, `fetch_problem_spec(query)`, queries LeetCode problem specifications, parsing the formal title, constraints, and test cases (using an online GraphQL client with an offline catalog fallback). The second tool, `execute_code_sandbox(code, testcases, language)`, compiles and executes the candidate solution inside an isolated execution environment, verifying stdout, assertion correctness, and execution runtime against each test case before returning a formal verification verdict.
+
+**2. What the Memory Does:**  
+The agent features a dual-layer memory system implemented in [`memory.py`](memory.py) comprising conversational history and an active working state buffer. The conversational memory records past dialogue turns, while the working state tracks the current problem ID, target programming language, and verification status. In multi-turn dialogues, when the user asks ambiguous follow-up requests (such as *"recommend a follow-up problem using a similar concept in C++"*), the agent reads back its memory of the previous turn (*"Two Sum in Python"*) to resolve entity references and maintain continuity without requiring repetitive user prompts.
+
+**3. One Honest Failure Hit and How We Handled It:**  
+During initial development, our agent frequently produced code that appeared syntactically valid but failed edge cases or timed out on non-adjacent inputs (for example, generating a naive adjacent-element search for Two Sum which failed when matching pairs were separated across the array). Rather than allowing the agent to fail silently or output an unverified answer like a conventional chatbot, we incorporated a dynamic ReAct self-healing feedback loop. When `execute_code_sandbox` observes a `Wrong Answer` or test failure, the agent catches the failure observation, inspects the failed test case, diagnoses the algorithmic flaw, synthesizes an optimal Hash Map approach, and autonomously triggers a second sandbox execution to achieve 100% test pass verification.
+
+---
+
+### 🔍 Viva Reference Guide (10 Marks)
+
+| Viva Question | Exact Code Location | Walkthrough Explanation |
+|---|---|---|
+| **1. Where does the plan-act loop decide the next step?** | [`agent.py: lines 185–260`](agent.py#L185-L260) | The `run()` method maintains a step counter and loop state. After calling each tool, it inspects `observation.get("status")`. If the status is not `"PASSED"`, it branches dynamically into the self-correction block to refine the code and re-test instead of exiting. |
+| **2. Walk through a tool call.** | [`agent.py: lines 211–220`](agent.py#L211-L220) $\rightarrow$ [`tools.py: lines 140–235`](tools.py#L140-L235) | The agent prepares `tool_args` (code, testcases, language) and invokes `self.tools["execute_code_sandbox"]["fn"](**tool_args)`. The tool executes the solution in an isolated dictionary scope (`exec`), feeds each test input, compares actual vs expected output, and records execution time. |
+| **3. Show where memory is read back.** | [`agent.py: lines 168–180`](agent.py#L168-L180) $\rightarrow$ [`memory.py: lines 65–85`](memory.py#L65-L85) | In `agent.py`, `_extract_intent_and_entities()` and `run()` call `self.memory.get_recent_history()` and `self.memory.get("last_problem_id")`. This resolves pronouns like *"this problem"* or *"follow-up"* back to the problem stored in previous turns. |
 
 ---
 
@@ -175,15 +208,19 @@ Every accepted solution is automatically formatted and committed to your GitHub 
 
 ```
 leetcode-solver/
+├── README.md                            # Complete Project Documentation & CA1 Report
+├── demo.ipynb                           # 📓 Interactive Jupyter Notebook Demo (Multi-step traces)
+├── run_demo.py                          # ⚡ Standalone CLI Demo Runner
+├── agent.py                             # 🤖 Autonomous ReAct Agent Loop
+├── tools.py                             # 🛠️ Agent Tools (Problem fetcher, Sandbox, Complexity)
+├── memory.py                            # 🧠 Conversational & Working Memory Module
 ├── manifest.json                        # Chrome Extension Manifest V3
 ├── LICENSE                              # MIT License
-├── README.md                            # Main Documentation
 │
-├── 📂 backend/                          # 24/7 Cloud Backend
+├── 📂 backend/                          # 24/7 Cloud Backend Server
 │   ├── Dockerfile                       # Container deployment config
 │   ├── package.json                     # Node.js dependencies
 │   ├── .env.example                     # Environment variables template
-│   ├── README.md                        # Cloud deployment guide (Render/Railway)
 │   ├── 📂 src/
 │   │   ├── bot.js                       # 24/7 Telegram bot controller & self-healing solver
 │   │   ├── leetcode.js                  # Search engine, GraphQL API, direct submission judge
@@ -219,18 +256,26 @@ leetcode-solver/
 
 ## ⚡ Quickstart Guide
 
-### Option 1: Run Locally (Desktop)
+### Option 1: Run Agent Demo (Python)
+Run the autonomous multi-step agent demo right from your terminal:
+```bash
+python run_demo.py
+```
+Or open the interactive Jupyter Notebook:
+```bash
+jupyter notebook demo.ipynb
+```
 
-1. **Clone the repository:**
+---
+
+### Option 2: Run 24/7 Backend Locally (Desktop)
+
+1. **Navigate to backend:**
    ```bash
-   git clone https://github.com/anmolnagpal18/leetcode-solver.git
-   cd leetcode-solver/backend
-   ```
-2. **Install dependencies:**
-   ```bash
+   cd backend
    npm install
    ```
-3. **Configure environment:**
+2. **Configure environment:**
    Create `backend/.env` (use `backend/.env.example` as reference):
    ```env
    PORT=3000
@@ -240,26 +285,10 @@ leetcode-solver/
    GITHUB_TOKEN=ghp_...
    GITHUB_REPO=anmolnagpal18/leetcode-solutions
    ```
-4. **Start the backend:**
+3. **Start the backend:**
    ```bash
    npm start
    ```
-
----
-
-### Option 2: 24/7 Free Cloud Deployment (Render.com)
-
-1. Fork or push this repository to your GitHub.
-2. Go to **[Render.com Dashboard](https://dashboard.render.com)** $\rightarrow$ **New +** $\rightarrow$ **Web Service**.
-3. Select your repository:
-   * **Root Directory:** `backend`
-   * **Build Command:** `npm install`
-   * **Start Command:** `npm start`
-   * **Instance Type:** `Free`
-4. In **Environment Variables**, add:
-   * `GROQ_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
-   * *(Optional)* `GITHUB_TOKEN`, `GITHUB_REPO`
-5. Click **Deploy Web Service** — Your bot will run online 24/7!
 
 ---
 
@@ -268,7 +297,7 @@ leetcode-solver/
 1. Open Google Chrome and go to **`chrome://extensions/`**.
 2. Turn on **Developer mode** (top right toggle).
 3. Click **Load unpacked** (top left).
-4. Select the `leetcode-solver` root folder (containing `manifest.json`).
+4. Select this root folder (containing `manifest.json`).
 5. Open the Extension $\rightarrow$ Click **`⚙️ Settings`** $\rightarrow$ Click **`🔗 Sync Account`**!
 
 <br />
