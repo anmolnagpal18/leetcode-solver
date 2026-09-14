@@ -39,7 +39,7 @@ const bot = new TelegramBotService(
   { groq, github, credManager }
 );
 
-const scheduler = new DailyScheduler(bot, { autoSolveDaily: AUTO_SOLVE_DAILY });
+const scheduler = new DailyScheduler(bot, credManager, { autoSolveDaily: AUTO_SOLVE_DAILY });
 
 // Lightweight HTTP Request Handler
 const server = http.createServer(async (req, res) => {
