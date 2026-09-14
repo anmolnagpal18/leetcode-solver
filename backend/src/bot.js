@@ -11,10 +11,67 @@ import {
   getSubmissionResult, 
   normalizeLanguageSlug, 
   verifyLeetCodeSession, 
-  attemptLeetCodePasswordLogin,
+  attemptLeetCodePasswordLogin, 
   getUserTodaySolveStats,
   getUnsolvedProblems
 } from './leetcode.js';
+import { getUserCurrentTime } from './scheduler.js';
+
+const TIMEZONE_ALIASES = {
+  'ist': 'Asia/Kolkata',
+  'india': 'Asia/Kolkata',
+  'est': 'America/New_York',
+  'edt': 'America/New_York',
+  'newyork': 'America/New_York',
+  'pst': 'America/Los_Angeles',
+  'pdt': 'America/Los_Angeles',
+  'california': 'America/Los_Angeles',
+  'cst': 'America/Chicago',
+  'cdt': 'America/Chicago',
+  'mst': 'America/Denver',
+  'mdt': 'America/Denver',
+  'gmt': 'UTC',
+  'utc': 'UTC',
+  'uk': 'Europe/London',
+  'london': 'Europe/London',
+  'bst': 'Europe/London',
+  'jst': 'Asia/Tokyo',
+  'japan': 'Asia/Tokyo',
+  'tokyo': 'Asia/Tokyo',
+  'sgt': 'Asia/Singapore',
+  'singapore': 'Asia/Singapore',
+  'cet': 'Europe/Paris',
+  'cest': 'Europe/Paris',
+  'paris': 'Europe/Paris',
+  'berlin': 'Europe/Berlin',
+  'aest': 'Australia/Sydney',
+  'sydney': 'Australia/Sydney',
+  'pkt': 'Asia/Karachi',
+  'pakistan': 'Asia/Karachi',
+  'karachi': 'Asia/Karachi',
+  'dubai': 'Asia/Dubai',
+  'gst': 'Asia/Dubai',
+  'uae': 'Asia/Dubai',
+  'bdt': 'Asia/Dhaka',
+  'bangladesh': 'Asia/Dhaka',
+  'dhaka': 'Asia/Dhaka',
+  'npt': 'Asia/Kathmandu',
+  'nepal': 'Asia/Kathmandu',
+  'kathmandu': 'Asia/Kathmandu'
+};
+
+function resolveTimezone(tzInput) {
+  if (!tzInput) return null;
+  const clean = tzInput.trim();
+  const lower = clean.toLowerCase();
+  const target = TIMEZONE_ALIASES[lower] || clean;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: target });
+    return target;
+  } catch {
+    return null;
+  }
+}
 
 export class TelegramBotService {
   constructor(config = {}, services = {}) {
@@ -213,6 +270,12 @@ export class TelegramBotService {
       return;
     }
 
+    if (rawText.startsWith('/timezone') || rawText.startsWith('/tz')) {
+      const rest = rawText.replace(/^\/(?:timezone|tz)/i, '').trim();
+      await this._handleTimezoneCommand(chatId, rest);
+      return;
+    }
+
     if (rawText.startsWith('/link') || rawText.startsWith('/login') || rawText.startsWith('/setup')) {
       const args = rawText.replace(/^\/(?:link|login|setup)/i, '').trim();
       await this._handleLinkCommand(chatId, args);
@@ -269,13 +332,17 @@ Solves any problem with Grandmaster AI, submits directly to LeetCode, runs the s
 📅 */today*
 Fetches today's official LeetCode Daily Challenge, tells you its solve status, and shows how many problems you have completed today!
 
-⏰ */timer [time | off]*
+⏰ */timer [time | off | now]*
 Sets a daily practice reminder timer so the bot reminds you on Telegram every day to maintain your streak.
-• Examples: \`/timer 08:00 PM\`, \`/timer 20:00\`, \`/timer off\`
+• Examples: \`/timer 08:00 PM\`, \`/timer 20:00\`, \`/timer off\`, \`/timer now\` (instant test)
 
-🕒 */schedule [time] [N] [lang | off]*
+🕒 */schedule [time] [N] [lang | off | now]*
 Sets an automated daily auto-solve schedule so the cloud bot automatically solves fresh unsolved challenges at that time every day with laptop OFF.
-• Examples: \`/schedule 10:00 PM 3 cpp\`, \`/schedule 22:00 1 py\`, \`/schedule 8 PM java\`, \`/schedule off\`
+• Examples: \`/schedule 10:00 PM 3 cpp\`, \`/schedule 22:00 1 py\`, \`/schedule 8 PM java\`, \`/schedule off\`, \`/schedule now\` (instant test)
+
+🌐 */timezone [tz] (or /tz [tz])*
+Sets your local timezone so schedules and reminders fire at the exact right local hour. Defaults to \`Asia/Kolkata\` (IST).
+• Examples: \`/tz IST\`, \`/timezone Asia/Kolkata\`, \`/tz EST\`, \`/tz PST\`, \`/tz UTC\`, \`/tz London\`
 
 🔗 */link*
 Complete 5-step wizard to link LeetCode, Groq AI, and GitHub Sync interactively.
@@ -287,7 +354,7 @@ Configures or updates your Groq AI API Key (\`gsk_...\`) for 24/7 autonomous cod
 Configures or updates your GitHub Personal Access Token and repository sync.
 
 👤 */account*
-Displays your linked LeetCode username, Groq AI engine status, GitHub repo sync status, and active schedules.
+Displays your linked LeetCode username, timezone, Groq AI engine status, GitHub repo sync status, and active schedules.
 
 ❌ */unlink [all | github | apikey]*
 Disconnects and permanently clears stored session credentials and configurations.
@@ -353,6 +420,8 @@ ${solvedSection}
     const ghConfig = this.credManager ? this.credManager.getGitHubConfig(chatId) : { repo: this.github?.repo || '', token: this.github?.token || '' };
     const timerConfig = this.credManager ? this.credManager.getTimer(chatId) : { enabled: false, time: '20:00' };
     const scheduleConfig = this.credManager ? this.credManager.getSchedule(chatId) : { enabled: false, time: '22:00', numQuestions: 1 };
+    const userTz = this.credManager ? this.credManager.getTimezone(chatId) : 'Asia/Kolkata';
+    const userTime = getUserCurrentTime(userTz);
 
     let leetCodeLine = '⚪ *Not linked* (Send `/link` to connect)';
     if (creds.session) {
@@ -395,6 +464,7 @@ ${solvedSection}
     }
     const timerLine = timerConfig.enabled ? `🟢 *Active* (${timerConfig.time})` : '⚪ *Disabled* (Set with `/timer 8 PM`)';
     const scheduleLine = scheduleConfig.enabled ? `🟢 *Active* (${scheduleConfig.time} — ${scheduleConfig.numQuestions} Q [${scheduleConfig.language || 'Python'}])` : '⚪ *Disabled* (Set with `/schedule 10 PM 3 cpp`)';
+    const tzLine = `🟢 *${userTz}* (Local Time: *${userTime.formatted}*)`;
 
     const text =
 `👤 *Account & Automation Status*
@@ -402,6 +472,9 @@ ${solvedSection}
 ━━━━━━━━━━━━━━━━━━━━
 🎯 *LeetCode Account:*
 ${leetCodeLine}
+
+🌐 *Timezone:*
+${tzLine}
 
 🤖 *Groq AI Engine:*
 ${groqLine}
@@ -421,6 +494,7 @@ ${scheduleLine}
 
 👉 *Quick Actions:*
 • Tap \`/solve\` to solve a problem
+• Tap \`/timezone\` to change timezone
 • Tap \`/timer\` to update reminder time
 • Tap \`/schedule\` to update auto-solve schedule
 • Tap \`/link\` to link LeetCode & API key
@@ -433,12 +507,15 @@ ${scheduleLine}
   async _handleTimerCommand(chatId, args) {
     if (!args) {
       const timerConfig = this.credManager ? this.credManager.getTimer(chatId) : { enabled: false, time: '20:00' };
-      const statusText = timerConfig.enabled ? `🟢 *Active at ${timerConfig.time}*` : '⚪ *Currently Disabled*';
+      const userTz = this.credManager ? this.credManager.getTimezone(chatId) : 'Asia/Kolkata';
+      const userTime = getUserCurrentTime(userTz);
+      const statusText = timerConfig.enabled ? `🟢 *Active at ${timerConfig.time}* (${userTz})` : '⚪ *Currently Disabled*';
 
       await this.sendMessage(chatId,
 `⏰ *Daily Practice Reminder Timer*
 
 Status: ${statusText}
+🌐 Current Timezone: *${userTz}* (Local Time: *${userTime.formatted}*)
 
 Every day at the scheduled time, the bot will send a reminder message to your Telegram with today's challenge so you never break your streak! 🔥
 
@@ -446,6 +523,7 @@ Every day at the scheduled time, the bot will send a reminder message to your Te
 • \`/timer 08:00 PM\`
 • \`/timer 20:00\`
 • \`/timer 09:30 AM\`
+• \`/timer now\` (to test immediately)
 • \`/timer off\` (to disable)
 
 Or reply with your desired time (e.g. *8 PM*):`
@@ -457,20 +535,49 @@ Or reply with your desired time (e.g. *8 PM*):`
     const clean = args.trim().toLowerCase();
     if (clean === 'off' || clean === 'disable' || clean === 'stop') {
       if (this.credManager) this.credManager.setTimer(chatId, false);
+      if (this.scheduler) this.scheduler.resetTimerTrigger(chatId);
       await this.sendMessage(chatId, '⚪ *Daily reminder timer disabled.* Send `/timer 8 PM` anytime to re-enable!');
+      return;
+    }
+
+    if (clean === 'now' || clean === 'test' || clean === 'run') {
+      const timerConfig = this.credManager ? this.credManager.getTimer(chatId) : { enabled: true, time: '20:00' };
+      const user = this.credManager ? this.credManager._getUser(chatId) : { chatId };
+      try {
+        const daily = await getDailyChallenge(user);
+        const statusStr = daily?.userStatus === 'Finish' ? ' (✅ Solved)' : ' (❌ Unsolved)';
+        const dailyInfo = daily ? `\n📖 *Today's Challenge:* #${daily.frontendId} ${daily.title} (${daily.difficulty})${statusStr}\n🔗 ${daily.url}` : '';
+
+        const reminderMsg =
+`⏰ *Instant Test: Daily LeetCode Practice Reminder!*
+
+It's *${timerConfig.time}* — Time to solve your daily problem and protect your streak! 🔥
+${dailyInfo}
+
+👉 *Quick action:* Tap \`/solve\` to generate and submit the solution automatically!`;
+
+        await this.sendMessage(chatId, reminderMsg);
+      } catch (err) {
+        await this.sendMessage(chatId, `❌ *Instant reminder test error:* ${err.message}`);
+      }
       return;
     }
 
     if (this.credManager) {
       const updated = this.credManager.setTimer(chatId, true, args);
-      if (this.scheduler) this.scheduler.resetTimerTrigger();
+      if (this.scheduler) this.scheduler.resetTimerTrigger(chatId);
       if (updated && updated.time) {
+        const userTz = this.credManager.getTimezone(chatId);
+        const userTime = getUserCurrentTime(userTz);
         await this.sendMessage(chatId,
 `⏰ *Daily Reminder Timer Activated!*
 
 🟢 Time set to: *${updated.time}*
+🌐 Timezone: *${userTz}* (Current Time: *${userTime.formatted}*)
 
-Every day at *${updated.time}*, I will send you a reminder message on Telegram with today's daily challenge to keep your streak alive! 🔥`
+Every day at *${updated.time}* (${userTz}), I will send you a reminder message on Telegram with today's daily challenge to keep your streak alive! 🔥
+
+💡 *Tip:* Test your reminder immediately with \`/timer now\`!`
         );
         return;
       }
@@ -482,6 +589,8 @@ Every day at *${updated.time}*, I will send you a reminder message on Telegram w
   // ── /schedule ──────────────────────────────────────────────────────────────
   async _handleScheduleCommand(chatId, args) {
     const existingSchedule = this.credManager ? this.credManager.getSchedule(chatId) : { enabled: false, time: '22:00', numQuestions: 1, language: 'Python' };
+    const userTz = this.credManager ? this.credManager.getTimezone(chatId) : 'Asia/Kolkata';
+    const userTime = getUserCurrentTime(userTz);
 
     if (!args) {
       const statusText = existingSchedule.enabled 
@@ -492,6 +601,7 @@ Every day at *${updated.time}*, I will send you a reminder message on Telegram w
 `🕒 *Autonomous Auto-Solve Schedule*
 
 Status: ${statusText}
+🌐 Current Timezone: *${userTz}* (Local Time: *${userTime.formatted}*)
 
 When active, the 24/7 Cloud Backend will automatically solve fresh unsolved challenges at the scheduled time in your chosen language, submit to LeetCode, and sync to GitHub!
 
@@ -500,6 +610,7 @@ When active, the 24/7 Cloud Backend will automatically solve fresh unsolved chal
 • \`/schedule 22:00 1 py\`
 • \`/schedule 08:30 PM 2 java\`
 • \`/schedule 11 PM rust\`
+• \`/schedule now\` (to test immediately)
 • \`/schedule off\` (to disable)
 
 Or reply with your desired schedule (e.g. *10 PM 3 cpp*):`
@@ -511,8 +622,81 @@ Or reply with your desired schedule (e.g. *10 PM 3 cpp*):`
     const clean = args.trim().toLowerCase();
     if (clean === 'off' || clean === 'disable' || clean === 'stop') {
       if (this.credManager) this.credManager.setSchedule(chatId, false);
-      if (this.scheduler) this.scheduler.resetScheduleTrigger();
+      if (this.scheduler) this.scheduler.resetScheduleTrigger(chatId);
       await this.sendMessage(chatId, '⚪ *Auto-solve schedule disabled.* Send `/schedule 10 PM 3 cpp` anytime to re-enable!');
+      return;
+    }
+
+    if (clean === 'now' || clean === 'test' || clean === 'run') {
+      const schedule = this.credManager ? this.credManager.getSchedule(chatId) : { enabled: true, numQuestions: 1, language: 'Python' };
+      const numQuestions = Math.max(1, parseInt(schedule.numQuestions || 1, 10));
+      const targetLang = schedule.language || 'Python';
+
+      await this.sendMessage(
+        chatId,
+        `🕒 *Instant Test: Triggering Auto-Solve Schedule Now...*\n` +
+        `🎯 *Target:* Solving *${numQuestions}* strictly unsolved challenge(s) in *${targetLang}*...\n` +
+        `🔍 Querying LeetCode for fresh, uncompleted problems...`
+      );
+
+      const user = this.credManager ? this.credManager._getUser(chatId) : { chatId };
+      try {
+        const unsolvedProblems = await getUnsolvedProblems(numQuestions, user);
+
+        if (!unsolvedProblems || unsolvedProblems.length === 0) {
+          await this.sendMessage(
+            chatId,
+            '⚠️ *No unsolved problems found matching criteria.* All problems in the search batch may already be completed!'
+          );
+          return;
+        }
+
+        const summaryList = unsolvedProblems
+          .map((p, idx) => `  *${idx + 1}.* #${p.frontendId} ${p.title} (${p.difficulty}) ${p.isDaily ? '🌟 *[Daily]*' : ''}`)
+          .join('\n');
+
+        await this.sendMessage(
+          chatId,
+          `📋 *Selected ${unsolvedProblems.length} Fresh Unsolved Challenge(s):*\n${summaryList}\n\n🚀 *Starting autonomous multi-attempt solver in ${targetLang}...*`
+        );
+
+        let solvedCount = 0;
+        for (let i = 0; i < unsolvedProblems.length; i++) {
+          const prob = unsolvedProblems[i];
+          const qNum = i + 1;
+
+          await this.sendMessage(
+            chatId,
+            `━━━━━━━━━━━━━━━━━━━━\n` +
+            `▶️ *[${qNum}/${unsolvedProblems.length}] Processing Challenge [${targetLang}]:*\n` +
+            `📖 *#${prob.frontendId} ${prob.title}* (${prob.difficulty})\n` +
+            `━━━━━━━━━━━━━━━━━━━━`
+          );
+
+          try {
+            const solveRes = await this._executeSolvePipeline(chatId, prob, targetLang);
+            if (solveRes && solveRes.success) {
+              solvedCount++;
+            }
+          } catch (pErr) {
+            console.error(`[Bot] Instant test error solving problem #${prob.frontendId}:`, pErr.message);
+            await this.sendMessage(chatId, `⚠️ *Error solving #${prob.frontendId}:* ${pErr.message}`);
+          }
+
+          if (i < unsolvedProblems.length - 1) {
+            await new Promise(r => setTimeout(r, 5000));
+          }
+        }
+
+        await this.sendMessage(
+          chatId,
+          `🏁 *Instant Auto-Solve Test Complete!* 🏆\n\n` +
+          `✅ *Summary:* Successfully resolved *${solvedCount} / ${unsolvedProblems.length}* problems in *${targetLang}*.\n` +
+          `🔥 Submissions and GitHub sync are completed!`
+        );
+      } catch (err) {
+        await this.sendMessage(chatId, `❌ *Instant Auto-Solve encountered an error:* ${err.message}`);
+      }
       return;
     }
 
@@ -520,22 +704,89 @@ Or reply with your desired schedule (e.g. *10 PM 3 cpp*):`
 
     if (this.credManager) {
       const updated = this.credManager.setSchedule(chatId, true, timeStr, numQ, lang);
-      if (this.scheduler) this.scheduler.resetScheduleTrigger();
+      if (this.scheduler) this.scheduler.resetScheduleTrigger(chatId);
       if (updated && updated.time) {
+        const userTz = this.credManager.getTimezone(chatId);
+        const userTime = getUserCurrentTime(userTz);
         await this.sendMessage(chatId,
 `🕒 *Autonomous Auto-Solve Schedule Activated!*
 
 🟢 Scheduled Time: *${updated.time}*
+🌐 Timezone: *${userTz}* (Current Time: *${userTime.formatted}*)
 📦 Questions per Day: *${updated.numQuestions}* (Strictly Unsolved)
 💻 Language: *${updated.language || 'Python'}*
 
-Every day at *${updated.time}*, the 24/7 Cloud Bot will automatically solve *${updated.numQuestions}* fresh unsolved challenge(s) in *${updated.language || 'Python'}*, submit to LeetCode, and sync commits to GitHub — completely autonomous even when your laptop is turned *OFF*! 🚀`
+Every day at *${updated.time}* (${userTz}), the 24/7 Cloud Bot will automatically solve *${updated.numQuestions}* fresh unsolved challenge(s) in *${updated.language || 'Python'}*, submit to LeetCode, and sync commits to GitHub — completely autonomous even when your laptop is turned *OFF*! 🚀
+
+💡 *Tip:* Test your schedule immediately with \`/schedule now\`!`
         );
         return;
       }
     }
 
     await this.sendMessage(chatId, '⚠️ *Invalid format.* Please use formats like `/schedule 10 PM 3 cpp`, `/schedule 22:00 2 py`, or `/schedule 11 PM java`.');
+  }
+
+  // ── /timezone ──────────────────────────────────────────────────────────────
+  async _handleTimezoneCommand(chatId, args) {
+    const currentTz = this.credManager ? this.credManager.getTimezone(chatId) : 'Asia/Kolkata';
+    const currentTime = getUserCurrentTime(currentTz);
+
+    if (!args) {
+      await this.sendMessage(chatId,
+`🌐 *Timezone Configuration*
+
+Current Timezone: 🟢 *${currentTz}*
+🕒 Local Time: *${currentTime.formatted}* (Date: *${currentTime.todayStr}*)
+
+Your reminder timer (\`/timer\`) and auto-solve schedule (\`/schedule\`) trigger based on this timezone!
+
+👉 *How to change your timezone:*
+• \`/tz IST\` or \`/timezone Asia/Kolkata\`
+• \`/tz EST\` or \`/timezone America/New_York\`
+• \`/tz PST\` or \`/timezone America/Los_Angeles\`
+• \`/tz CST\` or \`/timezone America/Chicago\`
+• \`/tz London\` or \`/timezone Europe/London\`
+• \`/tz UTC\` or \`/tz GMT\`
+• \`/tz Dubai\` or \`/timezone Asia/Dubai\`
+• \`/tz Dhaka\` or \`/timezone Asia/Dhaka\`
+• \`/tz Karachi\` or \`/timezone Asia/Karachi\`
+• \`/tz Singapore\` or \`/timezone Asia/Singapore\`
+• \`/tz Tokyo\` or \`/timezone Asia/Tokyo\`
+
+Or reply with your timezone name or city (e.g. *Asia/Kolkata* or *IST*):`
+      );
+      this.pendingLinking.set(chatId, { step: 'awaiting_timezone' });
+      return;
+    }
+
+    const resolved = resolveTimezone(args);
+    if (!resolved) {
+      await this.sendMessage(chatId,
+`⚠️ *Invalid Timezone: "${args.trim()}"*
+
+Please provide a valid IANA timezone name (e.g. \`Asia/Kolkata\`, \`America/New_York\`, \`Europe/London\`) or shortcut (e.g. \`IST\`, \`EST\`, \`PST\`, \`GMT\`, \`UTC\`, \`Dubai\`).`
+      );
+      return;
+    }
+
+    if (this.credManager) {
+      this.credManager.setTimezone(chatId, resolved);
+      if (this.scheduler) {
+        this.scheduler.resetScheduleTrigger(chatId);
+        this.scheduler.resetTimerTrigger(chatId);
+      }
+    }
+
+    const newTime = getUserCurrentTime(resolved);
+    await this.sendMessage(chatId,
+`🌐 *Timezone Updated Successfully!*
+
+🟢 Timezone: *${resolved}*
+🕒 Current Local Time: *${newTime.formatted}* (${newTime.todayStr})
+
+All your \`/timer\` and \`/schedule\` jobs are now precisely aligned to this timezone! 🚀`
+    );
   }
 
   _parseScheduleArgs(args, defaultLang = 'Python') {
@@ -942,6 +1193,12 @@ ${ghLine}
       return;
     }
 
+    if (state.step === 'awaiting_timezone') {
+      this.pendingLinking.delete(chatId);
+      await this._handleTimezoneCommand(chatId, text);
+      return;
+    }
+
     if (state.step === 'awaiting_direct_groq_key') {
       this.pendingLinking.delete(chatId);
       await this._handleApiKeyCommand(chatId, text);
@@ -988,7 +1245,7 @@ _(Make sure you didn't paste a CSRF token or session cookie)_
       }
 
       if (this.credManager) {
-        this.credManager.saveGitHub(state.githubToken, cleanRepo, 'main', 'solutions');
+        this.credManager.saveGitHub(chatId, state.githubToken, cleanRepo, 'main', 'solutions');
       }
       if (this.github) {
         this.github.setConfig(state.githubToken, cleanRepo, 'main', 'solutions');

@@ -3,6 +3,49 @@
 
 import { getDailyChallenge, getUnsolvedProblems } from './leetcode.js';
 
+export function getUserCurrentTime(timezone = 'Asia/Kolkata') {
+  try {
+    const tz = timezone || 'Asia/Kolkata';
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    const parts = formatter.formatToParts(new Date());
+    let hour = 0, minute = 0, second = 0, year = '', month = '', day = '';
+    for (const p of parts) {
+      if (p.type === 'hour') hour = parseInt(p.value, 10);
+      if (p.type === 'minute') minute = parseInt(p.value, 10);
+      if (p.type === 'second') second = parseInt(p.value, 10);
+      if (p.type === 'year') year = p.value;
+      if (p.type === 'month') month = p.value;
+      if (p.type === 'day') day = p.value;
+    }
+    if (hour === 24) hour = 0;
+    return {
+      hour,
+      minute,
+      second,
+      formatted: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
+      todayStr: `${year}-${month}-${day}`
+    };
+  } catch (e) {
+    const now = new Date();
+    return {
+      hour: now.getUTCHours(),
+      minute: now.getUTCMinutes(),
+      second: now.getUTCSeconds(),
+      formatted: `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`,
+      todayStr: now.toISOString().slice(0, 10)
+    };
+  }
+}
+
 export class DailyScheduler {
   constructor(botService, credManager, config = {}) {
     this.bot = botService;
@@ -36,7 +79,7 @@ export class DailyScheduler {
     console.log('[Scheduler] Daily reminder timer trigger reset.');
   }
 
-  start(intervalMs = 45 * 1000) { // Check every 45 seconds
+  start(intervalMs = 20 * 1000) { // Check every 20 seconds
     console.log('[Scheduler] ⏰ 24/7 Cloud Multi-User Scheduler, Daily Reminder & Auto-Solver started.');
     this.tick();
 
@@ -113,11 +156,6 @@ _Tap \`/solve\` to solve directly on your LeetCode account!_`;
     const users = this.credManager.getAllUsers();
     if (!users || users.length === 0) return;
 
-    const now = new Date();
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const currentHour = now.getHours();
-    const currentMinute = now.getMinutes();
-
     for (const user of users) {
       const chatId = user.chatId;
       if (!chatId) continue;
@@ -125,12 +163,15 @@ _Tap \`/solve\` to solve directly on your LeetCode account!_`;
       const timerConfig = user.timer || this.credManager.getTimer(chatId);
       if (!timerConfig || !timerConfig.enabled) continue;
 
-      const isMatchingTime = (currentHour === timerConfig.hour && Math.abs(currentMinute - timerConfig.minute) <= 1);
-      const triggerKey = `timer_${chatId}_${todayStr}_${timerConfig.hour}:${timerConfig.minute}`;
+      const userTz = user.timezone || (this.credManager ? this.credManager.getTimezone(chatId) : 'Asia/Kolkata');
+      const userTime = getUserCurrentTime(userTz);
+
+      const isMatchingTime = (userTime.hour === timerConfig.hour && Math.abs(userTime.minute - timerConfig.minute) <= 1);
+      const triggerKey = `timer_${chatId}_${userTime.todayStr}_${timerConfig.hour}:${timerConfig.minute}`;
 
       if (isMatchingTime && !this.triggeredTimers.has(triggerKey)) {
         this.triggeredTimers.add(triggerKey);
-        console.log(`[Scheduler] ⏰ Triggering Daily Reminder for user ${chatId} at ${timerConfig.time}...`);
+        console.log(`[Scheduler] ⏰ Triggering Daily Reminder for user ${chatId} at ${timerConfig.time} (${userTz})...`);
 
         try {
           const daily = await getDailyChallenge(user);
@@ -161,11 +202,6 @@ ${dailyInfo}
     const users = this.credManager.getAllUsers();
     if (!users || users.length === 0) return;
 
-    const now = new Date();
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const currentHour = now.getHours();
-    const currentMinute = now.getMinutes();
-
     for (const user of users) {
       const chatId = user.chatId;
       if (!chatId) continue;
@@ -173,8 +209,11 @@ ${dailyInfo}
       const scheduleConfig = user.schedule || this.credManager.getSchedule(chatId);
       if (!scheduleConfig || !scheduleConfig.enabled) continue;
 
-      const isMatchingTime = (currentHour === scheduleConfig.hour && Math.abs(currentMinute - scheduleConfig.minute) <= 1);
-      const triggerKey = `schedule_${chatId}_${todayStr}_${scheduleConfig.hour}:${scheduleConfig.minute}`;
+      const userTz = user.timezone || (this.credManager ? this.credManager.getTimezone(chatId) : 'Asia/Kolkata');
+      const userTime = getUserCurrentTime(userTz);
+
+      const isMatchingTime = (userTime.hour === scheduleConfig.hour && Math.abs(userTime.minute - scheduleConfig.minute) <= 1);
+      const triggerKey = `schedule_${chatId}_${userTime.todayStr}_${scheduleConfig.hour}:${scheduleConfig.minute}`;
 
       if (isMatchingTime && !this.triggeredSchedules.has(triggerKey) && !this.activeSolves.has(chatId)) {
         this.triggeredSchedules.add(triggerKey);
@@ -182,7 +221,7 @@ ${dailyInfo}
 
         const numQuestions = Math.max(1, parseInt(scheduleConfig.numQuestions || 1, 10));
         const targetLang = scheduleConfig.language || 'Python';
-        console.log(`[Scheduler] 🕒 Triggering Scheduled Auto-Solve for user ${chatId} at ${scheduleConfig.time} (${numQuestions} Qs in ${targetLang})...`);
+        console.log(`[Scheduler] 🕒 Triggering Scheduled Auto-Solve for user ${chatId} at ${scheduleConfig.time} (${userTz}, ${numQuestions} Qs in ${targetLang})...`);
 
         (async () => {
           try {

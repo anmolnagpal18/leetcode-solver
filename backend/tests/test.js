@@ -4,6 +4,7 @@
 import { searchProblem, getProblemDetails, getDailyChallenge, getRandomProblem, normalizeLanguageSlug } from '../src/leetcode.js';
 import { GroqService } from '../src/groq.js';
 import { TelegramBotService } from '../src/bot.js';
+import { getUserCurrentTime } from '../src/scheduler.js';
 
 let passed = 0;
 let failed = 0;
@@ -251,8 +252,43 @@ async function runTests() {
   assert(multiCM.getCredentials('11111').session === '', 'User 1 session cleared after unlinking');
   assert(multiCM.getCredentials('22222').session === 'session_user2', 'User 2 session remains intact after User 1 unlinks');
 
-  if (fsModule.existsSync(multiCredPath)) {
-    fsModule.unlinkSync(multiCredPath);
+  // Test Group 11: Timezone Awareness & Scheduler Timing
+  console.log('\n--- Test Group 11: Timezone Awareness & Schedule Timing ---');
+  const tzIST = getUserCurrentTime('Asia/Kolkata');
+  assert(typeof tzIST.hour === 'number' && tzIST.hour >= 0 && tzIST.hour <= 23, 'getUserCurrentTime("Asia/Kolkata") returns valid hour');
+  assert(typeof tzIST.minute === 'number' && tzIST.minute >= 0 && tzIST.minute <= 59, 'getUserCurrentTime("Asia/Kolkata") returns valid minute');
+  assert(/^\d{2}:\d{2}$/.test(tzIST.formatted), 'getUserCurrentTime returns formatted HH:mm');
+  assert(/^\d{4}-\d{2}-\d{2}$/.test(tzIST.todayStr), 'getUserCurrentTime returns formatted YYYY-MM-DD');
+
+  const tzUTC = getUserCurrentTime('UTC');
+  const tzEST = getUserCurrentTime('America/New_York');
+  assert(tzUTC.formatted.length === 5 && tzEST.formatted.length === 5, 'Timezone formatter works across international timezones');
+
+  // Test Timezone getter/setter
+  const tzTestCredPath = pathModule.resolve(process.cwd(), 'tests/test-tz-credentials.json');
+  if (fsModule.existsSync(tzTestCredPath)) {
+    fsModule.unlinkSync(tzTestCredPath);
+  }
+  const tzCM = new CredentialManager(tzTestCredPath);
+  assert(tzCM.getTimezone('userA') === 'Asia/Kolkata', 'Default timezone is Asia/Kolkata');
+
+  tzCM.setTimezone('userA', 'America/New_York');
+  assert(tzCM.getTimezone('userA') === 'America/New_York', 'setTimezone updates userA timezone to America/New_York');
+
+  tzCM.setTimezone('userB', 'Europe/London');
+  assert(tzCM.getTimezone('userB') === 'Europe/London', 'setTimezone updates userB timezone to Europe/London');
+  assert(tzCM.getTimezone('userA') === 'America/New_York', 'userA timezone remains isolated');
+
+  let invalidTzCaught = false;
+  try {
+    tzCM.setTimezone('userA', 'Invalid/Timezone_Name_123');
+  } catch (err) {
+    invalidTzCaught = true;
+  }
+  assert(invalidTzCaught, 'Setting invalid timezone throws descriptive error');
+
+  if (fsModule.existsSync(tzTestCredPath)) {
+    fsModule.unlinkSync(tzTestCredPath);
   }
 
   // Clean up isolated test credentials file

@@ -35,6 +35,7 @@ export class CredentialManager {
       githubBranch: process.env.GITHUB_BRANCH || 'main',
       githubFolder: process.env.GITHUB_FOLDER || 'solutions',
       chatId: chatId || process.env.TELEGRAM_CHAT_ID || '',
+      timezone: process.env.TIMEZONE || 'Asia/Kolkata',
       timer: { enabled: false, time: '20:00', hour: 20, minute: 0 },
       schedule: { enabled: false, time: '22:00', hour: 22, minute: 0, numQuestions: 1, language: 'Python' },
       unlinked: false,
@@ -60,6 +61,7 @@ export class CredentialManager {
             githubBranch: parsed.githubBranch || 'main',
             githubFolder: parsed.githubFolder || 'solutions',
             chatId: parsed.chatId,
+            timezone: parsed.timezone || process.env.TIMEZONE || 'Asia/Kolkata',
             timer: parsed.timer || { enabled: false, time: '20:00', hour: 20, minute: 0 },
             schedule: parsed.schedule || { enabled: false, time: '22:00', hour: 22, minute: 0, numQuestions: 1, language: 'Python' },
             unlinked: Boolean(parsed.unlinked),
@@ -75,6 +77,7 @@ export class CredentialManager {
           githubToken: (parsed.githubToken !== undefined && parsed.githubToken !== null) ? parsed.githubToken : (process.env.GITHUB_TOKEN || ''),
           githubRepo: (parsed.githubRepo !== undefined && parsed.githubRepo !== null) ? parsed.githubRepo : (process.env.GITHUB_REPO || ''),
           chatId: (parsed.chatId !== undefined && parsed.chatId !== null) ? parsed.chatId : (process.env.TELEGRAM_CHAT_ID || ''),
+          timezone: parsed.timezone || process.env.TIMEZONE || 'Asia/Kolkata',
           timer: parsed.timer || { enabled: false, time: '20:00', hour: 20, minute: 0 },
           schedule: parsed.schedule ? { enabled: false, time: '22:00', hour: 22, minute: 0, numQuestions: 1, language: 'Python', ...parsed.schedule } : { enabled: false, time: '22:00', hour: 22, minute: 0, numQuestions: 1, language: 'Python' },
           unlinked: Boolean(parsed.unlinked),
@@ -230,6 +233,49 @@ export class CredentialManager {
   getSchedule(chatId = null) {
     const user = this._getUser(chatId);
     return { ...user.schedule };
+  }
+
+  getTimezone(chatId = null) {
+    const user = this._getUser(chatId);
+    return user.timezone || process.env.TIMEZONE || 'Asia/Kolkata';
+  }
+
+  setTimezone(arg1, arg2 = null) {
+    let chatId = null;
+    let tz = 'Asia/Kolkata';
+
+    const isArg1ChatId = (typeof arg1 === 'number') || (typeof arg1 === 'string' && /^\d+$/.test(arg1.trim()));
+
+    if (isArg1ChatId && arg2 !== null && arg2 !== undefined) {
+      chatId = String(arg1);
+      tz = arg2;
+    } else if (arg2 !== null && arg2 !== undefined) {
+      chatId = arg1;
+      tz = arg2;
+    } else {
+      chatId = null;
+      tz = arg1 || 'Asia/Kolkata';
+    }
+
+    const cleanTz = (tz || '').trim();
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: cleanTz });
+    } catch {
+      throw new Error(`Invalid timezone "${cleanTz}". Example: Asia/Kolkata, America/New_York, UTC`);
+    }
+
+    const user = this._getUser(chatId);
+    user.timezone = cleanTz;
+    user.updatedAt = new Date().toISOString();
+
+    if (!chatId || user === this.data) {
+      this.data.timezone = cleanTz;
+    }
+
+    this.data.updatedAt = new Date().toISOString();
+    this._save();
+    console.log(`[Credentials] 🌐 Timezone set to ${cleanTz} ${chatId ? `for chat ${chatId}` : ''}.`);
+    return user.timezone;
   }
 
   getChatId(chatId = null) {
