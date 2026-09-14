@@ -593,3 +593,63 @@ export async function attemptLeetCodePasswordLogin(login, password) {
     };
   }
 }
+
+/**
+ * Queries user recent accepted submissions to calculate how many questions were solved today.
+ */
+export async function getUserTodaySolveStats(username, session = '', csrfToken = '') {
+  if (!username) return { count: 0, questions: [] };
+
+  try {
+    const res = await fetch(GRAPHQL_URL, {
+      method: 'POST',
+      headers: {
+        ...DEFAULT_HEADERS,
+        'x-csrftoken': csrfToken || '',
+        'Cookie': session ? `LEETCODE_SESSION=${session}; csrftoken=${csrfToken || ''};` : ''
+      },
+      body: JSON.stringify({
+        query: `query recentAcSubmissions($username: String!) {
+          recentAcSubmissionList(username: $username, limit: 20) {
+            id
+            title
+            titleSlug
+            timestamp
+          }
+        }`,
+        variables: { username }
+      })
+    });
+
+    if (!res.ok) return { count: 0, questions: [] };
+    const data = await res.json();
+    const list = data.data?.recentAcSubmissionList || [];
+
+    const now = new Date();
+    // UTC midnight timestamp
+    const startOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).getTime() / 1000;
+
+    const todaySubmissions = list.filter(sub => {
+      const subTime = parseInt(sub.timestamp, 10);
+      return subTime >= startOfToday;
+    });
+
+    const uniqueSolved = [];
+    const seen = new Set();
+    for (const sub of todaySubmissions) {
+      if (!seen.has(sub.titleSlug)) {
+        seen.add(sub.titleSlug);
+        uniqueSolved.push(sub);
+      }
+    }
+
+    return {
+      count: uniqueSolved.length,
+      questions: uniqueSolved
+    };
+  } catch (err) {
+    console.warn('[LeetCode] getUserTodaySolveStats error:', err.message);
+    return { count: 0, questions: [] };
+  }
+}
+
