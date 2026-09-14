@@ -8,24 +8,36 @@ export class DailyScheduler {
     this.bot = botService;
     this.credManager = credManager;
     this.lastNotifiedDate = null;
-    this.lastTimerTriggerKey = null;
-    this.lastScheduleTriggerKey = null;
+    this.triggeredTimers = new Set();
+    this.triggeredSchedules = new Set();
     this.timer = null;
-    this.isSolving = false;
+    this.activeSolves = new Set(); // set of chatIds currently solving
   }
 
-  resetScheduleTrigger() {
-    this.lastScheduleTriggerKey = null;
+  resetScheduleTrigger(chatId = null) {
+    if (chatId) {
+      for (const k of this.triggeredSchedules) {
+        if (k.startsWith(`schedule_${chatId}_`)) this.triggeredSchedules.delete(k);
+      }
+    } else {
+      this.triggeredSchedules.clear();
+    }
     console.log('[Scheduler] Auto-solve schedule trigger reset.');
   }
 
-  resetTimerTrigger() {
-    this.lastTimerTriggerKey = null;
+  resetTimerTrigger(chatId = null) {
+    if (chatId) {
+      for (const k of this.triggeredTimers) {
+        if (k.startsWith(`timer_${chatId}_`)) this.triggeredTimers.delete(k);
+      }
+    } else {
+      this.triggeredTimers.clear();
+    }
     console.log('[Scheduler] Daily reminder timer trigger reset.');
   }
 
   start(intervalMs = 45 * 1000) { // Check every 45 seconds
-    console.log('[Scheduler] ⏰ 24/7 Cloud Scheduler, Daily Reminder & Auto-Solver started.');
+    console.log('[Scheduler] ⏰ 24/7 Cloud Multi-User Scheduler, Daily Reminder & Auto-Solver started.');
     this.tick();
 
     this.timer = setInterval(() => {
@@ -47,22 +59,33 @@ export class DailyScheduler {
   }
 
   /**
-   * 1. Midnight UTC Challenge Announcement
+   * 1. Midnight UTC Challenge Announcement for All Users
    */
   async checkDailyMidnight() {
     try {
-      const creds = this.credManager ? this.credManager.getCredentials() : {};
-      const daily = await getDailyChallenge(creds);
-      if (!daily) return;
+      if (!this.bot || !this.bot.isConfigured || !this.credManager) return;
+      const users = this.credManager.getAllUsers();
+      if (!users || users.length === 0) return;
 
       const todayUTC = new Date().toISOString().slice(0, 10);
       if (this.lastNotifiedDate === todayUTC) return;
 
-      console.log(`[Scheduler] New day detected: ${todayUTC}. Active Daily Challenge: #${daily.frontendId} ${daily.title}`);
+      console.log(`[Scheduler] New day detected: ${todayUTC}. Broadcasting daily challenge to ${users.length} user(s)...`);
       this.lastNotifiedDate = todayUTC;
 
-      const statusMsg = daily.userStatus === 'Finish' ? '✅ Already Solved' : '❌ Unsolved';
-      const announcement =
+      // Clean old trigger sets daily
+      if (this.triggeredTimers.size > 200) this.triggeredTimers.clear();
+      if (this.triggeredSchedules.size > 200) this.triggeredSchedules.clear();
+
+      for (const user of users) {
+        const chatId = user.chatId;
+        if (!chatId) continue;
+        try {
+          const daily = await getDailyChallenge(user);
+          if (!daily) continue;
+
+          const statusMsg = daily.userStatus === 'Finish' ? '✅ Already Solved' : '❌ Unsolved';
+          const announcement =
 `🌅 *New LeetCode Daily Challenge Available!*
 
 📖 *#${daily.frontendId} ${daily.title}*
@@ -72,8 +95,10 @@ export class DailyScheduler {
 
 _Tap \`/solve\` to solve directly on your LeetCode account!_`;
 
-      if (this.bot && this.bot.isConfigured) {
-        await this.bot.sendMessage(null, announcement);
+          await this.bot.sendMessage(chatId, announcement);
+        } catch (uErr) {
+          console.warn(`[Scheduler] checkDailyMidnight error for user ${chatId}:`, uErr.message);
+        }
       }
     } catch (err) {
       console.warn('[Scheduler] checkDailyMidnight error:', err.message);
@@ -81,33 +106,38 @@ _Tap \`/solve\` to solve directly on your LeetCode account!_`;
   }
 
   /**
-   * 2. User's Daily Reminder Timer (/timer)
+   * 2. Per-User Daily Reminder Timer (/timer)
    */
   async checkReminderTimer() {
-    if (!this.credManager) return;
-    const timerConfig = this.credManager.getTimer();
-    if (!timerConfig || !timerConfig.enabled) return;
+    if (!this.bot || !this.bot.isConfigured || !this.credManager) return;
+    const users = this.credManager.getAllUsers();
+    if (!users || users.length === 0) return;
 
     const now = new Date();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    
-    // Check if time matches
     const currentHour = now.getHours();
     const currentMinute = now.getMinutes();
-    const isMatchingTime = (currentHour === timerConfig.hour && Math.abs(currentMinute - timerConfig.minute) <= 1);
-    const triggerKey = `${todayStr}_${timerConfig.hour}:${timerConfig.minute}`;
 
-    if (isMatchingTime && this.lastTimerTriggerKey !== triggerKey) {
-      this.lastTimerTriggerKey = triggerKey;
-      console.log(`[Scheduler] ⏰ Triggering Daily Reminder for user at ${timerConfig.time}...`);
+    for (const user of users) {
+      const chatId = user.chatId;
+      if (!chatId) continue;
 
-      try {
-        const creds = this.credManager.getCredentials();
-        const daily = await getDailyChallenge(creds);
-        const statusStr = daily?.userStatus === 'Finish' ? ' (✅ Solved)' : ' (❌ Unsolved)';
-        const dailyInfo = daily ? `\n📖 *Today's Challenge:* #${daily.frontendId} ${daily.title} (${daily.difficulty})${statusStr}\n🔗 ${daily.url}` : '';
+      const timerConfig = user.timer || this.credManager.getTimer(chatId);
+      if (!timerConfig || !timerConfig.enabled) continue;
 
-        const reminderMsg =
+      const isMatchingTime = (currentHour === timerConfig.hour && Math.abs(currentMinute - timerConfig.minute) <= 1);
+      const triggerKey = `timer_${chatId}_${todayStr}_${timerConfig.hour}:${timerConfig.minute}`;
+
+      if (isMatchingTime && !this.triggeredTimers.has(triggerKey)) {
+        this.triggeredTimers.add(triggerKey);
+        console.log(`[Scheduler] ⏰ Triggering Daily Reminder for user ${chatId} at ${timerConfig.time}...`);
+
+        try {
+          const daily = await getDailyChallenge(user);
+          const statusStr = daily?.userStatus === 'Finish' ? ' (✅ Solved)' : ' (❌ Unsolved)';
+          const dailyInfo = daily ? `\n📖 *Today's Challenge:* #${daily.frontendId} ${daily.title} (${daily.difficulty})${statusStr}\n🔗 ${daily.url}` : '';
+
+          const reminderMsg =
 `⏰ *Daily LeetCode Practice Reminder!*
 
 It's *${timerConfig.time}* — Time to solve your daily problem and protect your streak! 🔥
@@ -115,116 +145,114 @@ ${dailyInfo}
 
 👉 *Quick action:* Tap \`/solve\` to generate and submit the solution automatically!`;
 
-        if (this.bot && this.bot.isConfigured) {
-          await this.bot.sendMessage(null, reminderMsg);
+          await this.bot.sendMessage(chatId, reminderMsg);
+        } catch (err) {
+          console.warn(`[Scheduler] checkReminderTimer error for user ${chatId}:`, err.message);
         }
-      } catch (err) {
-        console.warn('[Scheduler] checkReminderTimer error:', err.message);
       }
     }
   }
 
   /**
-   * 3. User's Autonomous Auto-Solve Schedule (/schedule)
-   * Solves N strictly unsolved questions without repeating any completed questions.
+   * 3. Per-User Autonomous Auto-Solve Schedule (/schedule)
    */
   async checkAutoSolveSchedule() {
-    if (!this.credManager) return;
-    const scheduleConfig = this.credManager.getSchedule();
-    if (!scheduleConfig || !scheduleConfig.enabled) return;
+    if (!this.bot || !this.bot.isConfigured || !this.credManager) return;
+    const users = this.credManager.getAllUsers();
+    if (!users || users.length === 0) return;
 
     const now = new Date();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-
     const currentHour = now.getHours();
     const currentMinute = now.getMinutes();
-    const isMatchingTime = (currentHour === scheduleConfig.hour && Math.abs(currentMinute - scheduleConfig.minute) <= 1);
-    const triggerKey = `${todayStr}_${scheduleConfig.hour}:${scheduleConfig.minute}`;
 
-    if (isMatchingTime && this.lastScheduleTriggerKey !== triggerKey && !this.isSolving) {
-      this.lastScheduleTriggerKey = triggerKey;
-      this.isSolving = true;
+    for (const user of users) {
+      const chatId = user.chatId;
+      if (!chatId) continue;
 
-      const numQuestions = Math.max(1, parseInt(scheduleConfig.numQuestions || 1, 10));
-      const targetLang = scheduleConfig.language || 'Python';
-      console.log(`[Scheduler] 🕒 Triggering Scheduled Auto-Solve at ${scheduleConfig.time} (Target: ${numQuestions} unsolved questions in ${targetLang})...`);
+      const scheduleConfig = user.schedule || this.credManager.getSchedule(chatId);
+      if (!scheduleConfig || !scheduleConfig.enabled) continue;
 
-      try {
-        if (this.bot && this.bot.isConfigured) {
-          const creds = this.credManager.getCredentials();
+      const isMatchingTime = (currentHour === scheduleConfig.hour && Math.abs(currentMinute - scheduleConfig.minute) <= 1);
+      const triggerKey = `schedule_${chatId}_${todayStr}_${scheduleConfig.hour}:${scheduleConfig.minute}`;
 
-          await this.bot.sendMessage(
-            null,
-            `🕒 *Autonomous Auto-Solve Schedule Triggered (${scheduleConfig.time})!*\n` +
-            `🎯 *Target:* Solving *${numQuestions}* strictly unsolved challenge(s) in *${targetLang}*...\n` +
-            `🔍 Querying LeetCode for fresh, uncompleted problems...`
-          );
+      if (isMatchingTime && !this.triggeredSchedules.has(triggerKey) && !this.activeSolves.has(chatId)) {
+        this.triggeredSchedules.add(triggerKey);
+        this.activeSolves.add(chatId);
 
-          // Query N strictly unsolved problems
-          const unsolvedProblems = await getUnsolvedProblems(numQuestions, creds);
+        const numQuestions = Math.max(1, parseInt(scheduleConfig.numQuestions || 1, 10));
+        const targetLang = scheduleConfig.language || 'Python';
+        console.log(`[Scheduler] 🕒 Triggering Scheduled Auto-Solve for user ${chatId} at ${scheduleConfig.time} (${numQuestions} Qs in ${targetLang})...`);
 
-          if (!unsolvedProblems || unsolvedProblems.length === 0) {
+        (async () => {
+          try {
             await this.bot.sendMessage(
-              null,
-              '⚠️ *No unsolved problems found matching criteria.* All problems in the search batch may already be completed!'
-            );
-            this.isSolving = false;
-            return;
-          }
-
-          const summaryList = unsolvedProblems
-            .map((p, idx) => `  *${idx + 1}.* #${p.frontendId} ${p.title} (${p.difficulty}) ${p.isDaily ? '🌟 *[Daily]*' : ''}`)
-            .join('\n');
-
-          await this.bot.sendMessage(
-            null,
-            `📋 *Selected ${unsolvedProblems.length} Fresh Unsolved Challenge(s):*\n${summaryList}\n\n🚀 *Starting autonomous multi-attempt solver in ${targetLang}...*`
-          );
-
-          let solvedCount = 0;
-          for (let i = 0; i < unsolvedProblems.length; i++) {
-            const prob = unsolvedProblems[i];
-            const qNum = i + 1;
-
-            await this.bot.sendMessage(
-              null,
-              `━━━━━━━━━━━━━━━━━━━━\n` +
-              `▶️ *[${qNum}/${unsolvedProblems.length}] Processing Challenge [${targetLang}]:*\n` +
-              `📖 *#${prob.frontendId} ${prob.title}* (${prob.difficulty})\n` +
-              `━━━━━━━━━━━━━━━━━━━━`
+              chatId,
+              `🕒 *Autonomous Auto-Solve Schedule Triggered (${scheduleConfig.time})!*\n` +
+              `🎯 *Target:* Solving *${numQuestions}* strictly unsolved challenge(s) in *${targetLang}*...\n` +
+              `🔍 Querying LeetCode for fresh, uncompleted problems...`
             );
 
-            try {
-              const solveRes = await this.bot._executeSolvePipeline(null, prob, targetLang);
-              if (solveRes && solveRes.success) {
-                solvedCount++;
+            const unsolvedProblems = await getUnsolvedProblems(numQuestions, user);
+
+            if (!unsolvedProblems || unsolvedProblems.length === 0) {
+              await this.bot.sendMessage(
+                chatId,
+                '⚠️ *No unsolved problems found matching criteria.* All problems in the search batch may already be completed!'
+              );
+              return;
+            }
+
+            const summaryList = unsolvedProblems
+              .map((p, idx) => `  *${idx + 1}.* #${p.frontendId} ${p.title} (${p.difficulty}) ${p.isDaily ? '🌟 *[Daily]*' : ''}`)
+              .join('\n');
+
+            await this.bot.sendMessage(
+              chatId,
+              `📋 *Selected ${unsolvedProblems.length} Fresh Unsolved Challenge(s):*\n${summaryList}\n\n🚀 *Starting autonomous multi-attempt solver in ${targetLang}...*`
+            );
+
+            let solvedCount = 0;
+            for (let i = 0; i < unsolvedProblems.length; i++) {
+              const prob = unsolvedProblems[i];
+              const qNum = i + 1;
+
+              await this.bot.sendMessage(
+                chatId,
+                `━━━━━━━━━━━━━━━━━━━━\n` +
+                `▶️ *[${qNum}/${unsolvedProblems.length}] Processing Challenge [${targetLang}]:*\n` +
+                `📖 *#${prob.frontendId} ${prob.title}* (${prob.difficulty})\n` +
+                `━━━━━━━━━━━━━━━━━━━━`
+              );
+
+              try {
+                const solveRes = await this.bot._executeSolvePipeline(chatId, prob, targetLang);
+                if (solveRes && solveRes.success) {
+                  solvedCount++;
+                }
+              } catch (pErr) {
+                console.error(`[Scheduler] Error solving problem #${prob.frontendId}:`, pErr.message);
+                await this.bot.sendMessage(chatId, `⚠️ *Error solving #${prob.frontendId}:* ${pErr.message}`);
               }
-            } catch (pErr) {
-              console.error(`[Scheduler] Error solving problem #${prob.frontendId}:`, pErr.message);
-              await this.bot.sendMessage(null, `⚠️ *Error solving #${prob.frontendId}:* ${pErr.message}`);
+
+              if (i < unsolvedProblems.length - 1) {
+                await new Promise(r => setTimeout(r, 5000));
+              }
             }
 
-            // Pause 5 seconds between problems to respect LeetCode rate limits
-            if (i < unsolvedProblems.length - 1) {
-              console.log('[Scheduler] Pausing 5 seconds before next problem...');
-              await new Promise(r => setTimeout(r, 5000));
-            }
+            await this.bot.sendMessage(
+              chatId,
+              `🏁 *Scheduled Auto-Solve Complete!* 🏆\n\n` +
+              `✅ *Summary:* Successfully resolved *${solvedCount} / ${unsolvedProblems.length}* problems in *${targetLang}*.\n` +
+              `🔥 Submissions and GitHub sync are completed!`
+            );
+          } catch (err) {
+            console.warn(`[Scheduler] checkAutoSolveSchedule error for user ${chatId}:`, err.message);
+            await this.bot.sendMessage(chatId, `❌ *Scheduled Auto-Solve encountered an error:* ${err.message}`);
+          } finally {
+            this.activeSolves.delete(chatId);
           }
-
-          await this.bot.sendMessage(
-            null,
-            `🏁 *Scheduled Auto-Solve Complete!* 🏆\n\n` +
-            `✅ *Summary:* Successfully resolved *${solvedCount} / ${unsolvedProblems.length}* problems in *${targetLang}*.\n` +
-            `🔥 Submissions and GitHub sync are completed!`
-          );
-        }
-      } catch (err) {
-        console.warn('[Scheduler] checkAutoSolveSchedule error:', err.message);
-        if (this.bot && this.bot.isConfigured) {
-          await this.bot.sendMessage(null, `❌ *Scheduled Auto-Solve encountered an error:* ${err.message}`);
-        }
-      } finally {
-        this.isSolving = false;
+        })();
       }
     }
   }

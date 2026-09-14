@@ -203,6 +203,58 @@ async function runTests() {
   assert(cm.getGitHubConfig().repo === '', 'getGitHubConfig().repo is empty after clearGitHub()');
   assert(cm.getGitHubConfig().token === '', 'getGitHubConfig().token is empty after clearGitHub()');
 
+  // Test Group 10: Multi-User Isolation & Independent Profiles
+  console.log('\n--- Test Group 10: Multi-User Isolation & Multi-Phone Profiles ---');
+  const multiCredPath = pathModule.resolve(process.cwd(), 'tests/test-multi-credentials.json');
+  if (fsModule.existsSync(multiCredPath)) {
+    fsModule.unlinkSync(multiCredPath);
+  }
+
+  const multiCM = new CredentialManager(multiCredPath);
+
+  // Setup User 1 (Phone 1)
+  multiCM.saveCredentials('11111', 'session_user1', 'csrf_user1', 'user_one');
+  multiCM.saveGroqApiKey('11111', 'gsk_user1_secret_key');
+  multiCM.saveGitHub('11111', 'ghp_token1', 'user1/leetcode-solutions');
+  multiCM.setTimer('11111', true, '8 PM');
+  multiCM.setSchedule('11111', true, '10 PM', 3, 'C++');
+
+  // Setup User 2 (Phone 2)
+  multiCM.saveCredentials('22222', 'session_user2', 'csrf_user2', 'user_two');
+  multiCM.saveGroqApiKey('22222', 'gsk_user2_secret_key');
+  multiCM.saveGitHub('22222', 'ghp_token2', 'user2/my-solutions');
+  multiCM.setTimer('22222', true, '9 AM');
+  multiCM.setSchedule('22222', true, '8 PM', 1, 'Python');
+
+  // Verify User 1 isolation
+  assert(multiCM.getCredentials('11111').username === 'user_one', 'User 1 has username "user_one"');
+  assert(multiCM.getCredentials('11111').session === 'session_user1', 'User 1 has isolated session');
+  assert(multiCM.getGroqApiKey('11111') === 'gsk_user1_secret_key', 'User 1 has isolated Groq key');
+  assert(multiCM.getGitHubConfig('11111').repo === 'user1/leetcode-solutions', 'User 1 has isolated GitHub repo');
+  assert(multiCM.getTimer('11111').time === '20:00', 'User 1 has isolated 8 PM timer');
+  assert(multiCM.getSchedule('11111').numQuestions === 3 && multiCM.getSchedule('11111').language === 'C++', 'User 1 has isolated 3 Qs C++ schedule');
+
+  // Verify User 2 isolation
+  assert(multiCM.getCredentials('22222').username === 'user_two', 'User 2 has username "user_two"');
+  assert(multiCM.getCredentials('22222').session === 'session_user2', 'User 2 has isolated session');
+  assert(multiCM.getGroqApiKey('22222') === 'gsk_user2_secret_key', 'User 2 has isolated Groq key');
+  assert(multiCM.getGitHubConfig('22222').repo === 'user2/my-solutions', 'User 2 has isolated GitHub repo');
+  assert(multiCM.getTimer('22222').time === '09:00', 'User 2 has isolated 9 AM timer');
+  assert(multiCM.getSchedule('22222').numQuestions === 1 && multiCM.getSchedule('22222').language === 'Python', 'User 2 has isolated 1 Q Python schedule');
+
+  // Verify getAllUsers
+  const allUsers = multiCM.getAllUsers();
+  assert(allUsers.length === 2, 'getAllUsers() returns exactly 2 distinct user profiles');
+
+  // Verify clearing User 1 does not affect User 2
+  multiCM.clearCredentials('11111');
+  assert(multiCM.getCredentials('11111').session === '', 'User 1 session cleared after unlinking');
+  assert(multiCM.getCredentials('22222').session === 'session_user2', 'User 2 session remains intact after User 1 unlinks');
+
+  if (fsModule.existsSync(multiCredPath)) {
+    fsModule.unlinkSync(multiCredPath);
+  }
+
   // Clean up isolated test credentials file
   if (fsModule.existsSync(testCredPath)) {
     fsModule.unlinkSync(testCredPath);

@@ -37,20 +37,29 @@ export class TelegramBotService {
     return Boolean(this.token);
   }
 
-  get isAuthConfigured() {
-    if (this.credManager) return this.credManager.isConfigured;
-    return Boolean(this.leetcodeSession && this.leetcodeCsrfToken);
-  }
-
-  get authCredentials() {
+  getUserCredentials(chatId = null) {
     if (this.credManager) {
-      return this.credManager.getCredentials();
+      return this.credManager.getCredentials(chatId);
     }
     return {
       session: this.leetcodeSession,
       csrfToken: this.leetcodeCsrfToken,
       username: null
     };
+  }
+
+  isUserAuthConfigured(chatId = null) {
+    const creds = this.getUserCredentials(chatId);
+    return Boolean(creds.session && creds.csrfToken);
+  }
+
+  get isAuthConfigured() {
+    if (this.credManager) return this.credManager.isConfigured;
+    return Boolean(this.leetcodeSession && this.leetcodeCsrfToken);
+  }
+
+  get authCredentials() {
+    return this.getUserCredentials(null);
   }
 
   /**
@@ -144,17 +153,8 @@ export class TelegramBotService {
   async handleMessage(msg) {
     if (!msg || !msg.text) return;
     const chatId = String(msg.chat.id);
-
-    // Save active chatId for scheduled background jobs
+    // Save active chatId for user session and scheduled background jobs
     if (this.credManager) this.credManager.saveChatId(chatId);
-    if (!this.allowedChatId) this.allowedChatId = chatId;
-
-    // Whitelist check if TELEGRAM_CHAT_ID is set
-    if (this.allowedChatId && chatId !== this.allowedChatId) {
-      console.warn(`[Bot] Unauthorized access attempt from chatId: ${chatId}`);
-      await this.sendMessage(chatId, '⛔ *Unauthorized.* This bot is restricted to its owner.');
-      return;
-    }
 
     let rawText = msg.text.trim();
     // If text was sent via keyboard button (e.g. "🚀 /solve"), strip button emoji
@@ -303,7 +303,7 @@ Disconnects and permanently clears stored session credentials and configurations
     await this.sendMessage(chatId, '⏳ *Fetching today\'s LeetCode challenge & daily progress…*');
 
     try {
-      const creds = this.authCredentials;
+      const creds = this.getUserCredentials(chatId);
       const daily = await getDailyChallenge(creds);
       if (!daily) {
         await this.sendMessage(chatId, '❌ *Failed to fetch today\'s challenge.* LeetCode API might be temporarily busy.');
@@ -349,10 +349,10 @@ ${solvedSection}
   async _sendAccountStatus(chatId) {
     await this.sendMessage(chatId, '⏳ *Checking linked account details…*');
 
-    const creds = this.authCredentials;
-    const ghConfig = this.credManager ? this.credManager.getGitHubConfig() : { repo: this.github?.repo || '', token: this.github?.token || '' };
-    const timerConfig = this.credManager ? this.credManager.getTimer() : { enabled: false, time: '20:00' };
-    const scheduleConfig = this.credManager ? this.credManager.getSchedule() : { enabled: false, time: '22:00', numQuestions: 1 };
+    const creds = this.getUserCredentials(chatId);
+    const ghConfig = this.credManager ? this.credManager.getGitHubConfig(chatId) : { repo: this.github?.repo || '', token: this.github?.token || '' };
+    const timerConfig = this.credManager ? this.credManager.getTimer(chatId) : { enabled: false, time: '20:00' };
+    const scheduleConfig = this.credManager ? this.credManager.getSchedule(chatId) : { enabled: false, time: '22:00', numQuestions: 1 };
 
     let leetCodeLine = '⚪ *Not linked* (Send `/link` to connect)';
     if (creds.session) {
@@ -364,7 +364,7 @@ ${solvedSection}
       }
     }
 
-    const groqKey = this.credManager ? this.credManager.getGroqApiKey() : (this.groq?.apiKey || '');
+    const groqKey = this.credManager ? this.credManager.getGroqApiKey(chatId) : (this.groq?.apiKey || '');
     let groqLine = '⚪ *Not configured* (Send `/apikey <key>`)';
     if (groqKey) {
       const masked = groqKey.length > 10 ? `${groqKey.slice(0, 7)}...${groqKey.slice(-4)}` : 'Configured';
@@ -432,7 +432,7 @@ ${scheduleLine}
   // ── /timer ─────────────────────────────────────────────────────────────────
   async _handleTimerCommand(chatId, args) {
     if (!args) {
-      const timerConfig = this.credManager ? this.credManager.getTimer() : { enabled: false, time: '20:00' };
+      const timerConfig = this.credManager ? this.credManager.getTimer(chatId) : { enabled: false, time: '20:00' };
       const statusText = timerConfig.enabled ? `🟢 *Active at ${timerConfig.time}*` : '⚪ *Currently Disabled*';
 
       await this.sendMessage(chatId,
@@ -456,13 +456,13 @@ Or reply with your desired time (e.g. *8 PM*):`
 
     const clean = args.trim().toLowerCase();
     if (clean === 'off' || clean === 'disable' || clean === 'stop') {
-      if (this.credManager) this.credManager.setTimer(false);
+      if (this.credManager) this.credManager.setTimer(chatId, false);
       await this.sendMessage(chatId, '⚪ *Daily reminder timer disabled.* Send `/timer 8 PM` anytime to re-enable!');
       return;
     }
 
     if (this.credManager) {
-      const updated = this.credManager.setTimer(true, args);
+      const updated = this.credManager.setTimer(chatId, true, args);
       if (this.scheduler) this.scheduler.resetTimerTrigger();
       if (updated && updated.time) {
         await this.sendMessage(chatId,
@@ -481,7 +481,7 @@ Every day at *${updated.time}*, I will send you a reminder message on Telegram w
 
   // ── /schedule ──────────────────────────────────────────────────────────────
   async _handleScheduleCommand(chatId, args) {
-    const existingSchedule = this.credManager ? this.credManager.getSchedule() : { enabled: false, time: '22:00', numQuestions: 1, language: 'Python' };
+    const existingSchedule = this.credManager ? this.credManager.getSchedule(chatId) : { enabled: false, time: '22:00', numQuestions: 1, language: 'Python' };
 
     if (!args) {
       const statusText = existingSchedule.enabled 
@@ -510,7 +510,7 @@ Or reply with your desired schedule (e.g. *10 PM 3 cpp*):`
 
     const clean = args.trim().toLowerCase();
     if (clean === 'off' || clean === 'disable' || clean === 'stop') {
-      if (this.credManager) this.credManager.setSchedule(false);
+      if (this.credManager) this.credManager.setSchedule(chatId, false);
       if (this.scheduler) this.scheduler.resetScheduleTrigger();
       await this.sendMessage(chatId, '⚪ *Auto-solve schedule disabled.* Send `/schedule 10 PM 3 cpp` anytime to re-enable!');
       return;
@@ -519,7 +519,7 @@ Or reply with your desired schedule (e.g. *10 PM 3 cpp*):`
     const { timeStr, numQ, lang } = this._parseScheduleArgs(args, existingSchedule.language || 'Python');
 
     if (this.credManager) {
-      const updated = this.credManager.setSchedule(true, timeStr, numQ, lang);
+      const updated = this.credManager.setSchedule(chatId, true, timeStr, numQ, lang);
       if (this.scheduler) this.scheduler.resetScheduleTrigger();
       if (updated && updated.time) {
         await this.sendMessage(chatId,
@@ -625,9 +625,9 @@ Please paste your \`LEETCODE_SESSION\` cookie value:
         const verify = await verifyLeetCodeSession(session, csrf);
         if (verify.valid) {
           if (this.credManager) {
-            this.credManager.saveCredentials(session, csrf, verify.username, apiKey);
+            this.credManager.saveCredentials(chatId, session, csrf, verify.username, apiKey);
             if (ghToken && ghRepo) {
-              this.credManager.saveGitHub(ghToken, ghRepo);
+              this.credManager.saveGitHub(chatId, ghToken, ghRepo);
             }
           }
           if (apiKey && this.groq) {
@@ -670,7 +670,7 @@ Please paste your \`LEETCODE_SESSION\` cookie value:
   // ── /apikey ────────────────────────────────────────────────────────────────
   async _handleApiKeyCommand(chatId, args) {
     if (!args) {
-      const currentKey = this.credManager ? this.credManager.getGroqApiKey() : (this.groq?.apiKey || '');
+      const currentKey = this.credManager ? this.credManager.getGroqApiKey(chatId) : (this.groq?.apiKey || '');
       const statusText = currentKey ? `🟢 *Configured* (\`${currentKey.slice(0, 7)}...${currentKey.slice(-4)}\`)` : '⚪ *Not Configured*';
 
       await this.sendMessage(chatId,
@@ -692,7 +692,7 @@ Groq AI powers the Grandmaster solver and self-healing error correction loop wit
     const clean = args.trim();
     if (clean.length > 10) {
       if (this.credManager) {
-        this.credManager.saveGroqApiKey(clean);
+        this.credManager.saveGroqApiKey(chatId, clean);
       }
       if (this.groq) {
         this.groq.setApiKey(clean);
@@ -714,7 +714,7 @@ Groq AI powers the Grandmaster solver and self-healing error correction loop wit
   // ── /github ────────────────────────────────────────────────────────────────
   async _handleGitHubCommand(chatId, args) {
     if (!args) {
-      const currentConfig = this.credManager ? this.credManager.getGitHubConfig() : { repo: this.github?.repo || '', token: this.github?.token || '' };
+      const currentConfig = this.credManager ? this.credManager.getGitHubConfig(chatId) : { repo: this.github?.repo || '', token: this.github?.token || '' };
       const statusText = (currentConfig.repo && (currentConfig.token || this.github?.token))
         ? `🟢 *Connected* (\`${currentConfig.repo}\`)`
         : '⚪ *Not Configured*';
@@ -744,7 +744,7 @@ When configured, the bot automatically syncs your accepted code submissions to y
       const folder = parts[3] ? parts[3].trim() : 'solutions';
 
       if (this.credManager) {
-        this.credManager.saveGitHub(token, repo, branch, folder);
+        this.credManager.saveGitHub(chatId, token, repo, branch, folder);
       }
       if (this.github) {
         this.github.setConfig(token, repo, branch, folder);
@@ -788,7 +788,7 @@ Saved configuration: \`${repo}\``
 
     if (clean === 'apikey' || clean === 'groq' || clean === 'key') {
       if (this.credManager) {
-        this.credManager.saveGroqApiKey('');
+        this.credManager.saveGroqApiKey(chatId, '');
       }
       if (this.groq) {
         this.groq.setApiKey('');
@@ -803,7 +803,7 @@ The Groq API key has been removed. You can set a new key anytime with \`/apikey 
 
     if (clean === 'github' || clean === 'repo' || clean === 'git') {
       if (this.credManager) {
-        this.credManager.clearGitHub();
+        this.credManager.clearGitHub(chatId);
       }
       if (this.github) {
         this.github.token = '';
@@ -819,11 +819,11 @@ GitHub sync configuration and personal access token have been removed.`
 
     if (clean === 'all' || clean === 'everything' || clean === 'reset') {
       if (this.credManager) {
-        this.credManager.clearCredentials();
-        this.credManager.saveGroqApiKey('');
-        this.credManager.clearGitHub();
-        this.credManager.setTimer(false);
-        this.credManager.setSchedule(false);
+        this.credManager.clearCredentials(chatId);
+        this.credManager.saveGroqApiKey(chatId, '');
+        this.credManager.clearGitHub(chatId);
+        this.credManager.setTimer(chatId, false);
+        this.credManager.setSchedule(chatId, false);
       }
       this.leetcodeSession = '';
       this.leetcodeCsrfToken = '';
@@ -850,7 +850,7 @@ Send \`/link\` to connect your account again.`
 
     // Default: Clear LeetCode session credentials
     if (this.credManager) {
-      this.credManager.clearCredentials();
+      this.credManager.clearCredentials(chatId);
     }
     this.leetcodeSession = '';
     this.leetcodeCsrfToken = '';
@@ -868,9 +868,9 @@ Saved LeetCode session credentials have been cleared from the backend database. 
   }
 
   async _sendSetupComplete(chatId, state, githubRepo = null) {
-    const creds = this.authCredentials;
-    const groqKey = this.credManager ? this.credManager.getGroqApiKey() : (this.groq?.apiKey || '');
-    const ghConfig = this.credManager ? this.credManager.getGitHubConfig() : { repo: githubRepo || '' };
+    const creds = this.getUserCredentials(chatId);
+    const groqKey = this.credManager ? this.credManager.getGroqApiKey(chatId) : (this.groq?.apiKey || '');
+    const ghConfig = this.credManager ? this.credManager.getGitHubConfig(chatId) : { repo: githubRepo || '' };
 
     const username = creds.username || state?.username;
     const lcLine = username ? `🟢 *Linked & Verified* (@${username})` : '⚪ *Not linked*';
@@ -1044,7 +1044,7 @@ Please paste your \`csrftoken\` cookie value:
         state.csrf = cleanCsrf;
         state.username = verify.username;
         if (this.credManager) {
-          this.credManager.saveCredentials(state.session, cleanCsrf, verify.username);
+          this.credManager.saveCredentials(chatId, state.session, cleanCsrf, verify.username);
         }
         this.leetcodeSession = state.session;
         this.leetcodeCsrfToken = cleanCsrf;
@@ -1086,7 +1086,7 @@ Please paste your Groq AI API Key (\`gsk_...\`):
 
       if (!isSkip && clean.length > 10) {
         if (this.credManager) {
-          this.credManager.saveGroqApiKey(clean);
+          this.credManager.saveGroqApiKey(chatId, clean);
         }
         if (this.groq) {
           this.groq.setApiKey(clean);
@@ -1150,7 +1150,7 @@ _(Note: Do not paste CSRF token or session cookies here)_
       const repo = isSkip ? (state.username ? `${state.username}/leetcode-solutions` : 'anmolnagpal18/leetcode-solutions') : clean;
 
       if (this.credManager && state.githubToken) {
-        this.credManager.saveGitHub(state.githubToken, repo, 'main', 'solutions');
+        this.credManager.saveGitHub(chatId, state.githubToken, repo, 'main', 'solutions');
       }
       if (this.github && state.githubToken) {
         this.github.setConfig(state.githubToken, repo, 'main', 'solutions');
@@ -1172,7 +1172,7 @@ _(Note: Do not paste CSRF token or session cookies here)_
     if (batchMatch) {
       const count = Math.min(Math.max(parseInt(batchMatch[1], 10), 1), 10);
       const lang = batchMatch[2] ? batchMatch[2].trim() : 'Python';
-      const creds = this.authCredentials;
+      const creds = this.getUserCredentials(chatId);
 
       await this.sendMessage(chatId, `🎯 *Batch Solver Triggered:* Fetching *${count}* strictly unsolved problem(s)...`);
       const unsolvedProblems = await getUnsolvedProblems(count, creds);
@@ -1215,7 +1215,7 @@ _(Note: Do not paste CSRF token or session cookies here)_
       let problem = null;
       if (!query) {
         // Default: Fetch next unsolved challenge (daily if unsolved, else fresh problemset question)
-        const creds = this.authCredentials;
+        const creds = this.getUserCredentials(chatId);
         await this.sendMessage(chatId, '🔍 *Finding next unsolved challenge...*');
         const unsolved = await getUnsolvedProblems(1, creds);
         if (unsolved && unsolved.length > 0) {
@@ -1237,9 +1237,13 @@ _(Note: Do not paste CSRF token or session cookies here)_
   }
 
   async _executeSolvePipeline(chatId, problem, language) {
-    if (!this.groq || !this.groq.isConfigured) {
-      await this.sendMessage(chatId, '❌ *Groq AI key not configured in cloud backend.* Please set GROQ_API_KEY.');
+    const userGroqKey = this.credManager ? this.credManager.getGroqApiKey(chatId) : (this.groq?.apiKey || '');
+    if (!userGroqKey) {
+      await this.sendMessage(chatId, '❌ *Groq AI key not configured.* Please send `/apikey <key>` with your free Groq API key.');
       return { success: false, problem, error: 'Groq not configured' };
+    }
+    if (this.groq) {
+      this.groq.setApiKey(userGroqKey);
     }
 
     await this.sendMessage(chatId, `🔎 *Problem target:*\n#${problem.frontendId} *${problem.title}*\nDifficulty: *${problem.difficulty}*`);
@@ -1251,14 +1255,14 @@ _(Note: Do not paste CSRF token or session cookies here)_
     const snippet = (editorData.codeSnippets || []).find(s => s.langSlug === targetLangSlug);
     const templateCode = snippet ? snippet.code : '';
 
-    const creds = this.authCredentials;
-    if (!this.isAuthConfigured || !creds.session) {
+    const creds = this.getUserCredentials(chatId);
+    if (!creds || !creds.session) {
       await this.sendMessage(chatId, `⚙️ *Generating optimal ${language.toUpperCase()} solution...*`);
       const solution = await this.groq.generateSolution(details.title, details.description, language, templateCode);
       await this.sendMessage(chatId,
 `⚠️ *Automatic submission is unavailable.*
 
-No LeetCode account is linked to the cloud bot yet.
+No LeetCode account is linked for your chat yet.
 
 *Generated Solution Code:*
 \`\`\`${targetLangSlug}
@@ -1266,7 +1270,7 @@ ${solution.code}
 \`\`\`
 
 👉 *To enable 24/7 automatic submissions:*
-Click \`/link\` or click **🔗 Sync Account** in Chrome extension settings!`
+Send \`/link\` or click **🔗 Sync Account** in Chrome extension settings!`
       );
       return { success: false, problem, error: 'Not authenticated' };
     }
@@ -1342,7 +1346,7 @@ _Send \`/link\` if you need to refresh your session cookie._`
 💾 *Memory:* ${result.memory} ${result.memoryPercentile ? `(Beats ${result.memoryPercentile})` : ''}`;
 
         // Optional GitHub Sync with dynamic credential check
-        const ghConfig = this.credManager ? this.credManager.getGitHubConfig() : { repo: this.github?.repo || '', token: this.github?.token || '' };
+        const ghConfig = this.credManager ? this.credManager.getGitHubConfig(chatId) : { repo: this.github?.repo || '', token: this.github?.token || '' };
         if (ghConfig.token && ghConfig.repo && this.github) {
           this.github.setConfig(ghConfig.token, ghConfig.repo, ghConfig.branch || 'main', ghConfig.folder || 'solutions');
         }
