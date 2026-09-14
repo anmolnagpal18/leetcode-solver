@@ -59,7 +59,7 @@ function loadStats() {
 
 // ── Streak Protection Settings ────────────────────────────────────────────
 function loadStreakSettings() {
-  chrome.storage.sync.get(['streakProtect', 'streakProtectHour', 'streakProtectMinute', 'streakProtectAmPm'], data => {
+  chrome.storage.sync.get(['streakProtect', 'streakProtectHour', 'streakProtectMinute', 'streakProtectAmPm', 'streakProtectQuestions', 'streakProtectLanguage'], data => {
     const enabled = !!data.streakProtect;
     $('streak-protect').checked = enabled;
     $('automation-card').classList.toggle('enabled', enabled);
@@ -68,10 +68,14 @@ function loadStreakSettings() {
     const hour = data.streakProtectHour || '10';
     const min  = data.streakProtectMinute !== undefined ? String(data.streakProtectMinute).padStart(2, '0') : '00';
     const ampm = data.streakProtectAmPm  || 'PM';
+    const questions = data.streakProtectQuestions !== undefined ? String(data.streakProtectQuestions) : '1';
+    const language = data.streakProtectLanguage || 'cpp';
 
     $('streak-hour').value   = hour;
     $('streak-minute').value = min;
     $('streak-ampm').value   = ampm;
+    if ($('streak-questions')) $('streak-questions').value = questions;
+    if ($('streak-language')) $('streak-language').value = language;
   });
 }
 
@@ -85,10 +89,12 @@ function saveStreakSettings() {
   $('streak-minute').value = minStr;
 
   chrome.storage.sync.set({
-    streakProtect:       enabled,
-    streakProtectHour:   $('streak-hour').value,
-    streakProtectMinute: minStr,
-    streakProtectAmPm:   $('streak-ampm').value,
+    streakProtect:          enabled,
+    streakProtectHour:      $('streak-hour').value,
+    streakProtectMinute:    minStr,
+    streakProtectAmPm:      $('streak-ampm').value,
+    streakProtectQuestions: $('streak-questions') ? parseInt($('streak-questions').value, 10) || 1 : 1,
+    streakProtectLanguage:  $('streak-language') ? $('streak-language').value : 'cpp',
   });
 
   $('automation-card').classList.toggle('enabled', enabled);
@@ -219,6 +225,13 @@ async function init() {
   });
   $('goto-settings').addEventListener('click', e => { e.preventDefault(); openSettings(); });
   $('footer-settings').addEventListener('click', e => { e.preventDefault(); openSettings(); });
+  const tgBtn = $('btn-open-telegram');
+  if (tgBtn) {
+    tgBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      chrome.tabs.create({ url: 'https://t.me/leetcode_solverbot' });
+    });
+  }
 
   // ── Problem Quick Search ──────────────────────────────────────────────────
   async function performProblemSearch() {
@@ -321,6 +334,8 @@ async function init() {
   $('streak-ampm').addEventListener('change', saveStreakSettings);
   $('streak-minute').addEventListener('change', saveStreakSettings);
   $('streak-minute').addEventListener('blur', saveStreakSettings);
+  if ($('streak-questions')) $('streak-questions').addEventListener('change', saveStreakSettings);
+  if ($('streak-language')) $('streak-language').addEventListener('change', saveStreakSettings);
 
   $('btn-save-streak-time').addEventListener('click', async () => {
     saveStreakSettings();
@@ -386,7 +401,7 @@ async function init() {
       }
     }
     if (area === 'sync') {
-      if (changes.streakProtect || changes.streakProtectHour || changes.streakProtectMinute || changes.streakProtectAmPm) {
+      if (changes.streakProtect || changes.streakProtectHour || changes.streakProtectMinute || changes.streakProtectAmPm || changes.streakProtectQuestions || changes.streakProtectLanguage) {
         loadStreakSettings();
       }
     }

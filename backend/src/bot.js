@@ -12,7 +12,8 @@ import {
   normalizeLanguageSlug, 
   verifyLeetCodeSession, 
   attemptLeetCodePasswordLogin,
-  getUserTodaySolveStats
+  getUserTodaySolveStats,
+  getUnsolvedProblems
 } from './leetcode.js';
 
 export class TelegramBotService {
@@ -42,7 +43,7 @@ export class TelegramBotService {
   }
 
   get authCredentials() {
-    if (this.credManager && this.credManager.isConfigured) {
+    if (this.credManager) {
       return this.credManager.getCredentials();
     }
     return {
@@ -57,7 +58,7 @@ export class TelegramBotService {
    */
   async sendMessage(chatId, text, parseMode = 'Markdown', customMarkup = null) {
     if (!this.token) return;
-    const targetChatId = chatId || this.allowedChatId;
+    const targetChatId = chatId || this.allowedChatId || (this.credManager ? this.credManager.getChatId() : null);
     if (!targetChatId) return;
 
     const defaultKeyboard = {
@@ -65,11 +66,12 @@ export class TelegramBotService {
         [{ text: '🚀 /solve' }, { text: '📅 /today' }],
         [{ text: '⏰ /timer' }, { text: '🕒 /schedule' }],
         [{ text: '🔗 /link' }, { text: '👤 /account' }],
-        [{ text: '❌ /unlink' }, { text: '❓ /help' }]
+        [{ text: '🔑 /apikey' }, { text: '🐙 /github' }],
+        [{ text: '❓ /help' }]
       ],
       resize_keyboard: true,
       is_persistent: true,
-      input_field_placeholder: 'Type e.g. /solve 10 cpp, /timer 8 PM, or /today...'
+      input_field_placeholder: 'Type e.g. /solve 10 cpp, /schedule 10 PM 3 py, /link...'
     };
 
     const MAX_LEN = 4000;
@@ -143,6 +145,10 @@ export class TelegramBotService {
     if (!msg || !msg.text) return;
     const chatId = String(msg.chat.id);
 
+    // Save active chatId for scheduled background jobs
+    if (this.credManager) this.credManager.saveChatId(chatId);
+    if (!this.allowedChatId) this.allowedChatId = chatId;
+
     // Whitelist check if TELEGRAM_CHAT_ID is set
     if (this.allowedChatId && chatId !== this.allowedChatId) {
       console.warn(`[Bot] Unauthorized access attempt from chatId: ${chatId}`);
@@ -213,13 +219,26 @@ export class TelegramBotService {
       return;
     }
 
+    if (rawText.startsWith('/apikey') || rawText.startsWith('/groq') || rawText.startsWith('/key')) {
+      const args = rawText.replace(/^\/(?:apikey|groq|key)/i, '').trim();
+      await this._handleApiKeyCommand(chatId, args);
+      return;
+    }
+
+    if (rawText.startsWith('/github') || rawText.startsWith('/repo') || rawText.startsWith('/git')) {
+      const args = rawText.replace(/^\/(?:github|repo|git)/i, '').trim();
+      await this._handleGitHubCommand(chatId, args);
+      return;
+    }
+
     if (rawText.startsWith('/account') || rawText.startsWith('/status') || rawText.startsWith('/whoami')) {
       await this._sendAccountStatus(chatId);
       return;
     }
 
-    if (rawText.startsWith('/unlink') || rawText.startsWith('/logout')) {
-      await this._handleUnlinkCommand(chatId);
+    if (rawText.startsWith('/unlink') || rawText.startsWith('/logout') || rawText.startsWith('/disconnect')) {
+      const args = rawText.replace(/^\/(?:unlink|logout|disconnect)/i, '').trim();
+      await this._handleUnlinkCommand(chatId, args);
       return;
     }
 
@@ -254,18 +273,24 @@ Fetches today's official LeetCode Daily Challenge, tells you its solve status, a
 Sets a daily practice reminder timer so the bot reminds you on Telegram every day to maintain your streak.
 • Examples: \`/timer 08:00 PM\`, \`/timer 20:00\`, \`/timer off\`
 
-🕒 */schedule [time] [numQuestions | off]*
-Sets an automated daily auto-solve schedule so the cloud bot automatically solves today's challenge at that time every day with laptop OFF.
-• Examples: \`/schedule 10:00 PM 1\`, \`/schedule 22:00\`, \`/schedule off\`
+🕒 */schedule [time] [N] [lang | off]*
+Sets an automated daily auto-solve schedule so the cloud bot automatically solves fresh unsolved challenges at that time every day with laptop OFF.
+• Examples: \`/schedule 10:00 PM 3 cpp\`, \`/schedule 22:00 1 py\`, \`/schedule 8 PM java\`, \`/schedule off\`
 
 🔗 */link*
-Links your LeetCode account & GitHub repository interactively (or use the 1-Click Sync button in Chrome extension).
+Complete 5-step wizard to link LeetCode, Groq AI, and GitHub Sync interactively.
+
+🔑 */apikey [key]*
+Configures or updates your Groq AI API Key (\`gsk_...\`) for 24/7 autonomous code generation.
+
+🐙 */github [token] [owner/repo]*
+Configures or updates your GitHub Personal Access Token and repository sync.
 
 👤 */account*
-Displays your linked LeetCode username, GitHub repo sync status, active practice timer, and auto-solve schedule.
+Displays your linked LeetCode username, Groq AI engine status, GitHub repo sync status, and active schedules.
 
-❌ */unlink*
-Disconnects and permanently clears stored session credentials.
+❌ */unlink [all | github | apikey]*
+Disconnects and permanently clears stored session credentials and configurations.
 
 ───────────────
 💡 *Tip:* You can also tap the buttons below without typing!`;
@@ -278,13 +303,13 @@ Disconnects and permanently clears stored session credentials.
     await this.sendMessage(chatId, '⏳ *Fetching today\'s LeetCode challenge & daily progress…*');
 
     try {
-      const daily = await getDailyChallenge();
+      const creds = this.authCredentials;
+      const daily = await getDailyChallenge(creds);
       if (!daily) {
         await this.sendMessage(chatId, '❌ *Failed to fetch today\'s challenge.* LeetCode API might be temporarily busy.');
         return;
       }
 
-      const creds = this.authCredentials;
       let solveStats = { count: 0, questions: [] };
       if (creds.username) {
         solveStats = await getUserTodaySolveStats(creds.username, creds.session, creds.csrfToken);
@@ -325,7 +350,7 @@ ${solvedSection}
     await this.sendMessage(chatId, '⏳ *Checking linked account details…*');
 
     const creds = this.authCredentials;
-    const ghConfig = this.credManager ? this.credManager.getGitHubConfig() : { repo: 'anmolnagpal18/leetcode-solutions' };
+    const ghConfig = this.credManager ? this.credManager.getGitHubConfig() : { repo: this.github?.repo || '', token: this.github?.token || '' };
     const timerConfig = this.credManager ? this.credManager.getTimer() : { enabled: false, time: '20:00' };
     const scheduleConfig = this.credManager ? this.credManager.getSchedule() : { enabled: false, time: '22:00', numQuestions: 1 };
 
@@ -339,9 +364,37 @@ ${solvedSection}
       }
     }
 
-    const ghLine = ghConfig.repo ? `🟢 *Connected* (\`${ghConfig.repo}\`)` : '⚪ *Not configured*';
+    const groqKey = this.credManager ? this.credManager.getGroqApiKey() : (this.groq?.apiKey || '');
+    let groqLine = '⚪ *Not configured* (Send `/apikey <key>`)';
+    if (groqKey) {
+      const masked = groqKey.length > 10 ? `${groqKey.slice(0, 7)}...${groqKey.slice(-4)}` : 'Configured';
+      if (this.groq) {
+        this.groq.setApiKey(groqKey);
+        const groqPing = await this.groq.ping();
+        groqLine = groqPing.ok ? `🟢 *Connected & Active* (\`${masked}\`)` : `🟡 *Key Configured* (\`${masked}\` - Ping Warning)`;
+      } else {
+        groqLine = `🟢 *Connected* (\`${masked}\`)`;
+      }
+    }
+
+    const effectiveGhToken = ghConfig.token || this.github?.token || '';
+    const effectiveGhRepo = ghConfig.repo || this.github?.repo || '';
+    let ghLine = '⚪ *Not configured* (Send `/github` to connect)';
+    if (effectiveGhRepo && effectiveGhToken) {
+      if (this.github) {
+        this.github.setConfig(effectiveGhToken, effectiveGhRepo, ghConfig.branch || 'main', ghConfig.folder || 'solutions');
+        const ghPing = await this.github.ping();
+        if (ghPing.ok) {
+          ghLine = `🟢 *Connected & Verified* (\`${effectiveGhRepo}\`)`;
+        } else {
+          ghLine = `🔴 *Authentication Failed* (\`${effectiveGhRepo}\` - ${ghPing.error || 'Check Token'})`;
+        }
+      } else {
+        ghLine = `🟢 *Configured* (\`${effectiveGhRepo}\`)`;
+      }
+    }
     const timerLine = timerConfig.enabled ? `🟢 *Active* (${timerConfig.time})` : '⚪ *Disabled* (Set with `/timer 8 PM`)';
-    const scheduleLine = scheduleConfig.enabled ? `🟢 *Active* (${scheduleConfig.time} — ${scheduleConfig.numQuestions} Q)` : '⚪ *Disabled* (Set with `/schedule 10 PM 1`)';
+    const scheduleLine = scheduleConfig.enabled ? `🟢 *Active* (${scheduleConfig.time} — ${scheduleConfig.numQuestions} Q [${scheduleConfig.language || 'Python'}])` : '⚪ *Disabled* (Set with `/schedule 10 PM 3 cpp`)';
 
     const text =
 `👤 *Account & Automation Status*
@@ -349,6 +402,9 @@ ${solvedSection}
 ━━━━━━━━━━━━━━━━━━━━
 🎯 *LeetCode Account:*
 ${leetCodeLine}
+
+🤖 *Groq AI Engine:*
+${groqLine}
 
 🐙 *GitHub Sync Repository:*
 ${ghLine}
@@ -367,7 +423,8 @@ ${scheduleLine}
 • Tap \`/solve\` to solve a problem
 • Tap \`/timer\` to update reminder time
 • Tap \`/schedule\` to update auto-solve schedule
-• Tap \`/link\` to update credentials`;
+• Tap \`/link\` to link LeetCode & API key
+• Tap \`/apikey\` to update Groq AI key`;
 
     await this.sendMessage(chatId, text);
   }
@@ -406,6 +463,7 @@ Or reply with your desired time (e.g. *8 PM*):`
 
     if (this.credManager) {
       const updated = this.credManager.setTimer(true, args);
+      if (this.scheduler) this.scheduler.resetTimerTrigger();
       if (updated && updated.time) {
         await this.sendMessage(chatId,
 `⏰ *Daily Reminder Timer Activated!*
@@ -423,24 +481,28 @@ Every day at *${updated.time}*, I will send you a reminder message on Telegram w
 
   // ── /schedule ──────────────────────────────────────────────────────────────
   async _handleScheduleCommand(chatId, args) {
+    const existingSchedule = this.credManager ? this.credManager.getSchedule() : { enabled: false, time: '22:00', numQuestions: 1, language: 'Python' };
+
     if (!args) {
-      const scheduleConfig = this.credManager ? this.credManager.getSchedule() : { enabled: false, time: '22:00', numQuestions: 1 };
-      const statusText = scheduleConfig.enabled ? `🟢 *Active at ${scheduleConfig.time} (${scheduleConfig.numQuestions} Question)*` : '⚪ *Currently Disabled*';
+      const statusText = existingSchedule.enabled 
+        ? `🟢 *Active at ${existingSchedule.time} (${existingSchedule.numQuestions} Question${existingSchedule.numQuestions > 1 ? 's' : ''}, ${existingSchedule.language || 'Python'})*` 
+        : '⚪ *Currently Disabled*';
 
       await this.sendMessage(chatId,
 `🕒 *Autonomous Auto-Solve Schedule*
 
 Status: ${statusText}
 
-When active, the 24/7 Cloud Backend will automatically solve today's challenge at the scheduled time with the self-healing multi-attempt loop, submit to LeetCode, and sync to GitHub!
+When active, the 24/7 Cloud Backend will automatically solve fresh unsolved challenges at the scheduled time in your chosen language, submit to LeetCode, and sync to GitHub!
 
 👉 *How to set or change your schedule:*
-• \`/schedule 10:00 PM 1\`
-• \`/schedule 22:00\`
-• \`/schedule 11:00 PM 2\`
+• \`/schedule 10:00 PM 3 cpp\`
+• \`/schedule 22:00 1 py\`
+• \`/schedule 08:30 PM 2 java\`
+• \`/schedule 11 PM rust\`
 • \`/schedule off\` (to disable)
 
-Or reply with your desired schedule time (e.g. *10 PM*):`
+Or reply with your desired schedule (e.g. *10 PM 3 cpp*):`
       );
       this.pendingLinking.set(chatId, { step: 'awaiting_schedule_time' });
       return;
@@ -449,60 +511,135 @@ Or reply with your desired schedule time (e.g. *10 PM*):`
     const clean = args.trim().toLowerCase();
     if (clean === 'off' || clean === 'disable' || clean === 'stop') {
       if (this.credManager) this.credManager.setSchedule(false);
-      await this.sendMessage(chatId, '⚪ *Auto-solve schedule disabled.* Send `/schedule 10 PM 1` anytime to re-enable!');
+      if (this.scheduler) this.scheduler.resetScheduleTrigger();
+      await this.sendMessage(chatId, '⚪ *Auto-solve schedule disabled.* Send `/schedule 10 PM 3 cpp` anytime to re-enable!');
       return;
     }
 
-    // Parse time and optional question count
-    const parts = args.split(/\s+/);
-    let numQ = 1;
-    let timeStr = args;
-
-    if (parts.length > 1 && /^\d+$/.test(parts[parts.length - 1])) {
-      numQ = parseInt(parts[parts.length - 1], 10);
-      timeStr = parts.slice(0, parts.length - 1).join(' ');
-    }
+    const { timeStr, numQ, lang } = this._parseScheduleArgs(args, existingSchedule.language || 'Python');
 
     if (this.credManager) {
-      const updated = this.credManager.setSchedule(true, timeStr, numQ);
+      const updated = this.credManager.setSchedule(true, timeStr, numQ, lang);
+      if (this.scheduler) this.scheduler.resetScheduleTrigger();
       if (updated && updated.time) {
         await this.sendMessage(chatId,
 `🕒 *Autonomous Auto-Solve Schedule Activated!*
 
 🟢 Scheduled Time: *${updated.time}*
-📦 Questions per Day: *${updated.numQuestions}*
+📦 Questions per Day: *${updated.numQuestions}* (Strictly Unsolved)
+💻 Language: *${updated.language || 'Python'}*
 
-Every day at *${updated.time}*, the 24/7 Cloud Bot will automatically solve today's challenge, submit to LeetCode, and sync commits to GitHub — even if your laptop is completely turned *OFF*! 🚀`
+Every day at *${updated.time}*, the 24/7 Cloud Bot will automatically solve *${updated.numQuestions}* fresh unsolved challenge(s) in *${updated.language || 'Python'}*, submit to LeetCode, and sync commits to GitHub — completely autonomous even when your laptop is turned *OFF*! 🚀`
         );
         return;
       }
     }
 
-    await this.sendMessage(chatId, '⚠️ *Invalid format.* Please use formats like `/schedule 10 PM 1`, `/schedule 22:00`, or `/schedule 11 PM`.');
+    await this.sendMessage(chatId, '⚠️ *Invalid format.* Please use formats like `/schedule 10 PM 3 cpp`, `/schedule 22:00 2 py`, or `/schedule 11 PM java`.');
+  }
+
+  _parseScheduleArgs(args, defaultLang = 'Python') {
+    let clean = (args || '').trim();
+    let lang = defaultLang;
+    let numQ = 1;
+
+    const knownLangsMap = {
+      'python': 'Python', 'py': 'Python', 'python3': 'Python',
+      'cpp': 'C++', 'c++': 'C++',
+      'java': 'Java',
+      'javascript': 'JavaScript', 'js': 'JavaScript',
+      'typescript': 'TypeScript', 'ts': 'TypeScript',
+      'golang': 'Go', 'go': 'Go',
+      'rust': 'Rust',
+      'csharp': 'C#', 'c#': 'C#',
+      'c': 'C'
+    };
+
+    const tokens = clean.split(/\s+/);
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i].toLowerCase();
+      if (knownLangsMap[t]) {
+        lang = knownLangsMap[t];
+        tokens.splice(i, 1);
+        break;
+      }
+    }
+    clean = tokens.join(' ').replace(/\b(?:in|at|for)\b/gi, '').trim();
+
+    const countMatch = clean.match(/(\d+)\s*(?:questions?|problems?|q)\b/i);
+    if (countMatch) {
+      numQ = parseInt(countMatch[1], 10);
+      clean = clean.replace(countMatch[0], '').trim();
+    } else {
+      const remainingTokens = clean.split(/\s+/);
+      if (remainingTokens.length > 1 && /^\d+$/.test(remainingTokens[remainingTokens.length - 1])) {
+        numQ = parseInt(remainingTokens[remainingTokens.length - 1], 10);
+        clean = remainingTokens.slice(0, -1).join(' ').trim();
+      }
+    }
+
+    numQ = Math.min(Math.max(numQ, 1), 10);
+    const timeStr = clean.trim();
+
+    return { timeStr, numQ, lang };
   }
 
   // ── /link ──────────────────────────────────────────────────────────────────
   async _handleLinkCommand(chatId, args) {
-    // If inline args provided: /link <session> <csrf>
-    if (args) {
+    const clean = (args || '').trim().toLowerCase();
+
+    if (clean === 'github' || clean === 'repo') {
+      await this._handleGitHubCommand(chatId, '');
+      return;
+    }
+
+    if (clean === 'apikey' || clean === 'groq' || clean === 'ai') {
+      await this._handleApiKeyCommand(chatId, '');
+      return;
+    }
+
+    if (clean === 'leetcode' || clean === 'lc') {
+      this.pendingLinking.set(chatId, { step: 'awaiting_session_or_user', mode: 'leetcode_only' });
+      await this.sendMessage(chatId,
+`🔗 *LeetCode Account Setup (Step 1/2)*
+
+Please paste your \`LEETCODE_SESSION\` cookie value:
+
+💡 *(Found in Chrome DevTools → Application → Cookies → leetcode.com)*
+❌ *(To cancel, send \`/cancel\`)*`
+      );
+      return;
+    }
+
+    // If inline args provided: /link <session> <csrf> [groq_key] [github_token] [github_repo]
+    if (args && !['leetcode', 'groq', 'github', 'ai', 'repo', 'lc'].includes(clean)) {
       const parts = args.split(/\s+/);
       if (parts.length >= 2) {
         const session = parts[0].replace(/^LEETCODE_SESSION=/i, '').replace(/;$/, '').trim();
         const csrf = parts[1].replace(/^csrftoken=/i, '').replace(/;$/, '').trim();
+        const apiKey = (parts.length >= 3 && parts[2] !== '-' && parts[2] !== 'none') ? parts[2].trim() : null;
+        const ghToken = (parts.length >= 4 && parts[3] !== '-' && parts[3] !== 'none') ? parts[3].trim() : null;
+        const ghRepo = (parts.length >= 5 && parts[4] !== '-' && parts[4] !== 'none') ? parts[4].trim() : null;
 
         await this.sendMessage(chatId, '⏳ *Verifying LeetCode credentials…*');
         const verify = await verifyLeetCodeSession(session, csrf);
         if (verify.valid) {
           if (this.credManager) {
-            this.credManager.saveCredentials(session, csrf, verify.username);
+            this.credManager.saveCredentials(session, csrf, verify.username, apiKey);
+            if (ghToken && ghRepo) {
+              this.credManager.saveGitHub(ghToken, ghRepo);
+            }
           }
-          await this.sendMessage(chatId,
-`🎉 *Account Linked Successfully!*
+          if (apiKey && this.groq) {
+            this.groq.setApiKey(apiKey);
+          }
+          if (ghToken && ghRepo && this.github) {
+            this.github.setConfig(ghToken, ghRepo);
+          }
+          this.leetcodeSession = session;
+          this.leetcodeCsrfToken = csrf;
 
-👤 *LeetCode Username:* @${verify.username}
-🟢 *Status:* Authenticated & Saved Permanently
-🚀 *24/7 Submissions:* Active (Works even with laptop turned OFF!)`
-          );
+          await this._sendSetupComplete(chatId, { username: verify.username }, ghRepo);
           return;
         } else {
           await this.sendMessage(chatId, `❌ *Invalid credentials:* ${verify.error}`);
@@ -511,25 +648,207 @@ Every day at *${updated.time}*, the 24/7 Cloud Bot will automatically solve toda
       }
     }
 
-    // Step-by-step interactive linking
+    // Step-by-step interactive linking (full 5-step wizard)
     this.pendingLinking.set(chatId, { step: 'awaiting_session_or_user' });
     await this.sendMessage(chatId,
-`🔗 *LeetCode & GitHub Account Setup*
+`🔗 *Autonomous Companion Setup Wizard (Step 1/5: LeetCode Session)*
 
-You can link your LeetCode account in two easy ways:
+Welcome! Let's connect your accounts so the bot can autonomously solve and sync solutions 24/7.
 
-1️⃣ *Zero-Click Chrome Extension (Easiest):*
-Open Chrome $\rightarrow$ Click Extension $\rightarrow$ **⚙️ Settings** $\rightarrow$ Click **\`🔗 Sync Account\`**!
+Please paste your \`LEETCODE_SESSION\` cookie value:
 
-2️⃣ *Paste Session Cookie:*
-Paste your \`LEETCODE_SESSION\` cookie value here.
+💡 *How to get your session cookie:*
+1. Open [leetcode.com](https://leetcode.com) and log into your account
+2. Press \`F12\` → **Application** tab → **Cookies** → \`https://leetcode.com\`
+3. Copy the value of \`LEETCODE_SESSION\` and paste it here
 
-*(To cancel, send \`/cancel\`)*`
+*(Or use the **🔗 Sync** button in Chrome Extension settings)*
+*(To cancel anytime, send \`/cancel\`)*`
     );
   }
 
+  // ── /apikey ────────────────────────────────────────────────────────────────
+  async _handleApiKeyCommand(chatId, args) {
+    if (!args) {
+      const currentKey = this.credManager ? this.credManager.getGroqApiKey() : (this.groq?.apiKey || '');
+      const statusText = currentKey ? `🟢 *Configured* (\`${currentKey.slice(0, 7)}...${currentKey.slice(-4)}\`)` : '⚪ *Not Configured*';
+
+      await this.sendMessage(chatId,
+`🤖 *Groq AI API Key Configuration*
+
+Current Status: ${statusText}
+
+Groq AI powers the Grandmaster solver and self-healing error correction loop with blazing fast generation.
+
+👉 *How to set or change your Groq API Key:*
+• \`/apikey gsk_...\`
+• Or reply with your Groq API Key directly:
+*(Get a 100% free key from console.groq.com)*`
+      );
+      this.pendingLinking.set(chatId, { step: 'awaiting_direct_groq_key' });
+      return;
+    }
+
+    const clean = args.trim();
+    if (clean.length > 10) {
+      if (this.credManager) {
+        this.credManager.saveGroqApiKey(clean);
+      }
+      if (this.groq) {
+        this.groq.setApiKey(clean);
+      }
+
+      const masked = clean.length > 10 ? `${clean.slice(0, 7)}...${clean.slice(-4)}` : 'Saved';
+      await this.sendMessage(chatId,
+`🤖 *Groq AI API Key Saved Successfully!*
+
+🟢 API Key: \`${masked}\`
+⚡ *AI Engine:* Connected & Ready for 24/7 automated solving! 🚀`
+      );
+      return;
+    }
+
+    await this.sendMessage(chatId, '⚠️ *Invalid API Key format.* Please provide a valid Groq API key starting with `gsk_...`.');
+  }
+
+  // ── /github ────────────────────────────────────────────────────────────────
+  async _handleGitHubCommand(chatId, args) {
+    if (!args) {
+      const currentConfig = this.credManager ? this.credManager.getGitHubConfig() : { repo: this.github?.repo || '', token: this.github?.token || '' };
+      const statusText = (currentConfig.repo && (currentConfig.token || this.github?.token))
+        ? `🟢 *Connected* (\`${currentConfig.repo}\`)`
+        : '⚪ *Not Configured*';
+
+      await this.sendMessage(chatId,
+`🐙 *GitHub Sync Configuration*
+
+Current Status: ${statusText}
+
+When configured, the bot automatically syncs your accepted code submissions to your GitHub repository with markdown problem descriptions!
+
+👉 *How to set or change your GitHub Sync:*
+• \`/github <token> <owner/repo>\`
+  _(Example: \`/github ghp_abc123 anmolnagpal18/leetcode-solutions\`)_
+• Or reply with your GitHub Personal Access Token (\`ghp_...\`):
+  _(Create a token with \`repo\` scope at github.com/settings/tokens)_`
+      );
+      this.pendingLinking.set(chatId, { step: 'awaiting_direct_github_token' });
+      return;
+    }
+
+    const parts = args.split(/\s+/);
+    if (parts.length >= 2) {
+      const token = parts[0].trim();
+      const repo = parts[1].trim();
+      const branch = parts[2] ? parts[2].trim() : 'main';
+      const folder = parts[3] ? parts[3].trim() : 'solutions';
+
+      if (this.credManager) {
+        this.credManager.saveGitHub(token, repo, branch, folder);
+      }
+      if (this.github) {
+        this.github.setConfig(token, repo, branch, folder);
+      }
+
+      await this.sendMessage(chatId, '⏳ *Testing GitHub repository connection…*');
+      const pingRes = this.github ? await this.github.ping() : { ok: true };
+
+      if (pingRes.ok) {
+        await this.sendMessage(chatId,
+`🐙 *GitHub Repository Linked Successfully!*
+
+🟢 Repository: \`${repo}\`
+📁 Branch: \`${branch}\` | Folder: \`${folder}\`
+✅ *Connection Verified:* Solutions will automatically sync on every accepted submission!`
+        );
+      } else {
+        await this.sendMessage(chatId,
+`⚠️ *GitHub Config Saved with Warning:*
+Could not verify repository access: ${pingRes.error || 'Check repository name or token permissions.'}
+
+Saved configuration: \`${repo}\``
+        );
+      }
+      return;
+    }
+
+    // If single arg provided: could be just token or repo
+    if (parts[0].startsWith('ghp_') || parts[0].length > 20) {
+      this.pendingLinking.set(chatId, { step: 'awaiting_direct_github_repo', githubToken: parts[0] });
+      await this.sendMessage(chatId, `🔑 *GitHub Token Saved.* Now enter your GitHub Repository name (\`owner/repo\`), e.g. \`anmolnagpal18/leetcode-solutions\`:`);
+      return;
+    }
+
+    await this.sendMessage(chatId, '⚠️ *Invalid format.* Use `/github <token> <owner/repo>` or send `/github` to configure step-by-step.');
+  }
+
   // ── /unlink ────────────────────────────────────────────────────────────────
-  async _handleUnlinkCommand(chatId) {
+  async _handleUnlinkCommand(chatId, args = '') {
+    const clean = (args || '').trim().toLowerCase();
+
+    if (clean === 'apikey' || clean === 'groq' || clean === 'key') {
+      if (this.credManager) {
+        this.credManager.saveGroqApiKey('');
+      }
+      if (this.groq) {
+        this.groq.setApiKey('');
+      }
+      await this.sendMessage(chatId,
+`⚪ *Groq AI API Key Cleared.*
+
+The Groq API key has been removed. You can set a new key anytime with \`/apikey <key>\`.`
+      );
+      return;
+    }
+
+    if (clean === 'github' || clean === 'repo' || clean === 'git') {
+      if (this.credManager) {
+        this.credManager.clearGitHub();
+      }
+      if (this.github) {
+        this.github.token = '';
+        this.github.repo = '';
+      }
+      await this.sendMessage(chatId,
+`⚪ *GitHub Sync Repository Cleared.*
+
+GitHub sync configuration and personal access token have been removed.`
+      );
+      return;
+    }
+
+    if (clean === 'all' || clean === 'everything' || clean === 'reset') {
+      if (this.credManager) {
+        this.credManager.clearCredentials();
+        this.credManager.saveGroqApiKey('');
+        this.credManager.clearGitHub();
+        this.credManager.setTimer(false);
+        this.credManager.setSchedule(false);
+      }
+      this.leetcodeSession = '';
+      this.leetcodeCsrfToken = '';
+      if (this.groq) {
+        this.groq.setApiKey('');
+      }
+      if (this.github) {
+        this.github.token = '';
+        this.github.repo = '';
+      }
+      await this.sendMessage(chatId,
+`⚪ *All Credentials & Schedules Cleared.*
+
+• LeetCode session: Unlinked
+• Groq AI API Key: Cleared
+• GitHub Sync Repository: Cleared
+• Practice Timer: Disabled
+• Auto-solve Schedule: Disabled
+
+Send \`/link\` to connect your account again.`
+      );
+      return;
+    }
+
+    // Default: Clear LeetCode session credentials
     if (this.credManager) {
       this.credManager.clearCredentials();
     }
@@ -538,8 +857,72 @@ Paste your \`LEETCODE_SESSION\` cookie value here.
     await this.sendMessage(chatId,
 `⚪ *Account Unlinked Successfully.*
 
-Saved LeetCode session credentials have been cleared from the backend database. Automatic submissions are now paused until you re-link.`
+Saved LeetCode session credentials have been cleared from the backend database. Automatic submissions are now paused until you re-link.
+
+💡 *Tips:*
+• Use \`/link\` to connect your account
+• Use \`/unlink apikey\` to clear Groq API key
+• Use \`/unlink github\` to clear GitHub sync
+• Use \`/unlink all\` to reset everything`
     );
+  }
+
+  async _sendSetupComplete(chatId, state, githubRepo = null) {
+    const creds = this.authCredentials;
+    const groqKey = this.credManager ? this.credManager.getGroqApiKey() : (this.groq?.apiKey || '');
+    const ghConfig = this.credManager ? this.credManager.getGitHubConfig() : { repo: githubRepo || '' };
+
+    const username = creds.username || state?.username;
+    const lcLine = username ? `🟢 *Linked & Verified* (@${username})` : '⚪ *Not linked*';
+    
+    let groqLine = '⚪ *Not configured* (Send `/apikey <key>`)';
+    if (groqKey) {
+      const masked = groqKey.length > 10 ? `${groqKey.slice(0, 7)}...${groqKey.slice(-4)}` : 'Configured';
+      groqLine = `🟢 *Connected* (\`${masked}\`)`;
+    }
+
+    const effectiveGhToken = ghConfig.token || state?.githubToken || this.github?.token || '';
+    const effectiveGhRepo = ghConfig.repo || githubRepo || this.github?.repo || '';
+    let ghLine = '⚪ *Not configured* (Send `/github <token> <repo>`)';
+    if (effectiveGhRepo && effectiveGhToken) {
+      if (this.github) {
+        this.github.setConfig(effectiveGhToken, effectiveGhRepo, ghConfig.branch || 'main', ghConfig.folder || 'solutions');
+        const ping = await this.github.ping();
+        if (ping.ok) {
+          ghLine = `🟢 *Connected & Verified* (\`${effectiveGhRepo}\`)`;
+        } else {
+          ghLine = `🟡 *Configured with Warning* (\`${effectiveGhRepo}\` - ${ping.error || 'Access warning'})`;
+        }
+      } else {
+        ghLine = `🟢 *Connected* (\`${effectiveGhRepo}\`)`;
+      }
+    }
+
+    const text =
+`🎉 *All Services Linked & Configured Successfully!*
+
+━━━━━━━━━━━━━━━━━━━━
+🎯 *LeetCode Account:*
+${lcLine}
+
+🤖 *Groq AI Engine:*
+${groqLine}
+
+🐙 *GitHub Sync Repository:*
+${ghLine}
+
+🚀 *24/7 Cloud Engine:*
+🟢 *Online & Submissions Active* (Works even with laptop OFF!)
+━━━━━━━━━━━━━━━━━━━━
+
+👉 *Quick Actions:*
+• Tap \`/today\` to check today's daily challenge
+• Tap \`/solve\` to solve any problem with AI
+• Tap \`/timer 8 PM\` to set your daily reminder
+• Tap \`/schedule 10 PM 3 cpp\` to set auto-solving
+• Tap \`/account\` to view full status`;
+
+    await this.sendMessage(chatId, text);
   }
 
   // ── Interactive State Machine ──────────────────────────────────────────────
@@ -559,58 +942,287 @@ Saved LeetCode session credentials have been cleared from the backend database. 
       return;
     }
 
+    if (state.step === 'awaiting_direct_groq_key') {
+      this.pendingLinking.delete(chatId);
+      await this._handleApiKeyCommand(chatId, text);
+      return;
+    }
+
+    if (state.step === 'awaiting_direct_github_token') {
+      const clean = text.trim();
+      if (clean.toLowerCase() === '/cancel' || clean.toLowerCase() === 'cancel') {
+        this.pendingLinking.delete(chatId);
+        await this.sendMessage(chatId, '❌ *GitHub setup cancelled.*');
+        return;
+      }
+
+      const isTokenFormat = clean.startsWith('ghp_') || clean.startsWith('github_pat_') || clean.startsWith('gho_') || clean.startsWith('ghs_');
+      if (isTokenFormat || (clean.length > 20 && !clean.includes(';'))) {
+        state.githubToken = clean;
+        state.step = 'awaiting_direct_github_repo';
+        await this.sendMessage(chatId,
+`🐙 *GitHub Token Received!*
+
+Now enter your repository name in \`owner/repo\` format (e.g. \`anmolnagpal18/leetcode-solutions\`):`
+        );
+        return;
+      } else {
+        await this.sendMessage(chatId,
+`⚠️ *Invalid GitHub Token format.*
+
+GitHub Personal Access Tokens start with \`ghp_...\` (Classic) or \`github_pat_...\` (Fine-grained).
+_(Make sure you didn't paste a CSRF token or session cookie)_
+
+👉 Create a token with **\`repo\`** scope at [github.com/settings/tokens](https://github.com/settings/tokens) and paste it here:`
+        );
+        return;
+      }
+    }
+
+    if (state.step === 'awaiting_direct_github_repo') {
+      this.pendingLinking.delete(chatId);
+      const cleanRepo = text.trim();
+      if (!cleanRepo.includes('/')) {
+        await this.sendMessage(chatId, '⚠️ *Invalid repository format.* Must be in `owner/repo` format, e.g. `anmolnagpal18/leetcode-solutions`. Configuration not saved.');
+        return;
+      }
+
+      if (this.credManager) {
+        this.credManager.saveGitHub(state.githubToken, cleanRepo, 'main', 'solutions');
+      }
+      if (this.github) {
+        this.github.setConfig(state.githubToken, cleanRepo, 'main', 'solutions');
+      }
+
+      await this.sendMessage(chatId, '⏳ *Testing GitHub repository connection…*');
+      const pingRes = this.github ? await this.github.ping() : { ok: true };
+      if (pingRes.ok) {
+        await this.sendMessage(chatId,
+`🐙 *GitHub Sync Configured Successfully!*
+
+🟢 Repository: \`${cleanRepo}\`
+📁 Branch: \`main\` | Folder: \`solutions/\`
+✅ Verified & Ready to sync solutions automatically!`
+        );
+      } else {
+        await this.sendMessage(chatId,
+`⚠️ *GitHub Config Saved with Notice:*
+Could not verify repository access: ${pingRes.error || 'Check repository permissions.'}
+Saved repository: \`${cleanRepo}\``
+        );
+      }
+      return;
+    }
+
+    // Step 1: Session Cookie
     if (state.step === 'awaiting_session_or_user') {
       const clean = text.replace(/^LEETCODE_SESSION=/i, '').replace(/;$/, '').trim();
       if (clean.length > 30) {
         state.session = clean;
         state.step = 'awaiting_csrf';
-        await this.sendMessage(chatId, `🔑 *Step 2/2:* Please paste your \`csrftoken\` value:`);
+        await this.sendMessage(chatId,
+`🔑 *Account Setup Wizard (Step 2/5: LeetCode CSRF Token)*
+
+Please paste your \`csrftoken\` cookie value:
+*(Found right next to LEETCODE_SESSION in Chrome DevTools)*
+*(To cancel, send \`/cancel\`)*`
+        );
         return;
       } else {
-        await this.sendMessage(chatId, `⚠️ *Invalid cookie length.* Please paste the full LEETCODE_SESSION value or use the **🔗 Sync Account** button in Chrome.`);
+        await this.sendMessage(chatId, `⚠️ *Invalid cookie length.* Please paste the full LEETCODE_SESSION value or use the **🔗 Sync** button in Chrome.`);
         this.pendingLinking.delete(chatId);
         return;
       }
     }
 
+    // Step 2: CSRF Token & Verification
     if (state.step === 'awaiting_csrf') {
       const cleanCsrf = text.replace(/^csrftoken=/i, '').replace(/;$/, '').trim();
-      this.pendingLinking.delete(chatId);
-
       await this.sendMessage(chatId, '⏳ *Verifying LeetCode session…*');
       const verify = await verifyLeetCodeSession(state.session, cleanCsrf);
       if (verify.valid) {
+        state.csrf = cleanCsrf;
+        state.username = verify.username;
         if (this.credManager) {
           this.credManager.saveCredentials(state.session, cleanCsrf, verify.username);
         }
-        await this.sendMessage(chatId,
+        this.leetcodeSession = state.session;
+        this.leetcodeCsrfToken = cleanCsrf;
+
+        if (state.mode === 'leetcode_only') {
+          this.pendingLinking.delete(chatId);
+          await this.sendMessage(chatId,
 `🎉 *LeetCode Account Linked Successfully!*
 
-👤 *Username:* @${verify.username}
-🟢 *Status:* Authenticated 24/7
-🚀 You can now use \`/solve\` anytime from your phone!`
+👤 *LeetCode Username:* @${verify.username}
+🟢 *Status:* Authenticated & Saved 24/7
+🚀 Automatic submissions are now active!`
+          );
+          return;
+        }
+
+        state.step = 'awaiting_groq_key';
+        await this.sendMessage(
+          chatId,
+`✅ *LeetCode Authenticated:* @${verify.username}
+
+🤖 *Account Setup Wizard (Step 3/5: Groq AI API Key)*
+Please paste your Groq AI API Key (\`gsk_...\`):
+• Get a 100% free key at [console.groq.com/keys](https://console.groq.com/keys)
+• Or send \`/skip\` to keep your current AI configuration.`
         );
+        return;
       } else {
+        this.pendingLinking.delete(chatId);
         await this.sendMessage(chatId, `❌ *Authentication Failed:* ${verify.error}\n_Please try copying cookies again or use 1-Click Sync in Chrome._`);
+        return;
       }
+    }
+
+    // Step 3: Groq AI Key
+    if (state.step === 'awaiting_groq_key') {
+      const clean = text.trim();
+      const isSkip = clean.toLowerCase() === '/skip' || clean.toLowerCase() === 'skip';
+
+      if (!isSkip && clean.length > 10) {
+        if (this.credManager) {
+          this.credManager.saveGroqApiKey(clean);
+        }
+        if (this.groq) {
+          this.groq.setApiKey(clean);
+        }
+        const masked = clean.length > 10 ? `${clean.slice(0, 7)}...${clean.slice(-4)}` : 'Saved';
+        await this.sendMessage(chatId, `🤖 *Groq AI Key Saved:* \`${masked}\` ✅`);
+      }
+
+      state.step = 'awaiting_github_token';
+      await this.sendMessage(
+        chatId,
+`🐙 *Account Setup Wizard (Step 4/5: GitHub Personal Access Token)*
+Please paste your GitHub Personal Access Token (\`ghp_...\` with \`repo\` scope):
+• Create one at [github.com/settings/tokens](https://github.com/settings/tokens)
+• Or send \`/skip\` to finish without GitHub sync.`
+      );
+      return;
+    }
+
+    // Step 4: GitHub Token
+    if (state.step === 'awaiting_github_token') {
+      const clean = text.trim();
+      const isSkip = clean.toLowerCase() === '/skip' || clean.toLowerCase() === 'skip';
+
+      if (isSkip) {
+        this.pendingLinking.delete(chatId);
+        await this._sendSetupComplete(chatId, state);
+        return;
+      }
+
+      const isTokenFormat = clean.startsWith('ghp_') || clean.startsWith('github_pat_') || clean.startsWith('gho_') || clean.startsWith('ghs_');
+      if (isTokenFormat || (clean.length > 20 && !clean.includes(';'))) {
+        state.githubToken = clean;
+        state.step = 'awaiting_github_repo';
+        await this.sendMessage(
+          chatId,
+`📁 *Account Setup Wizard (Step 5/5: GitHub Repository)*
+Please enter your GitHub repository in \`owner/repo\` format:
+• Example: \`anmolnagpal18/leetcode-solutions\`
+• Or send \`/skip\` to use default (\`${state.username || 'anmolnagpal18'}/leetcode-solutions\`):`
+        );
+        return;
+      } else {
+        await this.sendMessage(
+          chatId,
+`⚠️ *Invalid GitHub Token format.*
+GitHub Personal Access Tokens start with \`ghp_...\` (Classic) or \`github_pat_...\` (Fine-grained).
+_(Note: Do not paste CSRF token or session cookies here)_
+
+👉 Paste your GitHub PAT or send \`/skip\` to finish without GitHub:`
+        );
+        return;
+      }
+    }
+
+    // Step 5: GitHub Repo
+    if (state.step === 'awaiting_github_repo') {
+      this.pendingLinking.delete(chatId);
+      const clean = text.trim();
+      const isSkip = clean.toLowerCase() === '/skip' || clean.toLowerCase() === 'skip';
+      const repo = isSkip ? (state.username ? `${state.username}/leetcode-solutions` : 'anmolnagpal18/leetcode-solutions') : clean;
+
+      if (this.credManager && state.githubToken) {
+        this.credManager.saveGitHub(state.githubToken, repo, 'main', 'solutions');
+      }
+      if (this.github && state.githubToken) {
+        this.github.setConfig(state.githubToken, repo, 'main', 'solutions');
+      }
+
+      await this._sendSetupComplete(chatId, state, repo);
+      return;
     }
   }
 
   // ── /solve Pipeline with Self-Healing Multi-Attempt Loop ────────────────────
   async _handleSolveCommand(chatId, rest) {
-    const { query, language } = this._extractQueryAndLanguage(rest, 'Python');
+    const cleanRest = (rest || '').trim();
+
+    // Check if user requested batch unsolved solving: e.g. "3 questions cpp", "10 problems", "batch 3"
+    const batchRegex = /^(?:batch\s+)?(\d+)\s*(?:questions?|problems?|q|unsolved)\s*([a-zA-Z+#]*)$/i;
+    const batchMatch = cleanRest.match(batchRegex);
+
+    if (batchMatch) {
+      const count = Math.min(Math.max(parseInt(batchMatch[1], 10), 1), 10);
+      const lang = batchMatch[2] ? batchMatch[2].trim() : 'Python';
+      const creds = this.authCredentials;
+
+      await this.sendMessage(chatId, `🎯 *Batch Solver Triggered:* Fetching *${count}* strictly unsolved problem(s)...`);
+      const unsolvedProblems = await getUnsolvedProblems(count, creds);
+
+      if (!unsolvedProblems || unsolvedProblems.length === 0) {
+        await this.sendMessage(chatId, '⚠️ *No unsolved problems found.*');
+        return;
+      }
+
+      const summaryList = unsolvedProblems
+        .map((p, idx) => `  *${idx + 1}.* #${p.frontendId} ${p.title} (${p.difficulty}) ${p.isDaily ? '🌟 *[Daily]*' : ''}`)
+        .join('\n');
+
+      await this.sendMessage(chatId, `📋 *Selected ${unsolvedProblems.length} Unsolved Challenge(s):*\n${summaryList}\n\n🚀 *Starting solve pipeline...*`);
+
+      let solvedCount = 0;
+      for (let i = 0; i < unsolvedProblems.length; i++) {
+        const prob = unsolvedProblems[i];
+        await this.sendMessage(
+          chatId,
+          `━━━━━━━━━━━━━━━━━━━━\n` +
+          `▶️ *[${i + 1}/${unsolvedProblems.length}] Solving #${prob.frontendId} ${prob.title}* (${prob.difficulty})\n` +
+          `━━━━━━━━━━━━━━━━━━━━`
+        );
+
+        const res = await this._executeSolvePipeline(chatId, prob, lang);
+        if (res && res.success) solvedCount++;
+
+        if (i < unsolvedProblems.length - 1) {
+          await new Promise(r => setTimeout(r, 5000));
+        }
+      }
+
+      await this.sendMessage(chatId, `🏁 *Batch Solving Complete!* Successfully resolved *${solvedCount}/${unsolvedProblems.length}* problems. 🏆`);
+      return;
+    }
+
+    const { query, language } = this._extractQueryAndLanguage(cleanRest, 'Python');
     try {
       let problem = null;
       if (!query) {
-        // Default to today's daily challenge
-        const daily = await getDailyChallenge();
-        if (daily) {
-          problem = {
-            slug: daily.titleSlug,
-            title: daily.title,
-            frontendId: daily.frontendId,
-            difficulty: daily.difficulty
-          };
+        // Default: Fetch next unsolved challenge (daily if unsolved, else fresh problemset question)
+        const creds = this.authCredentials;
+        await this.sendMessage(chatId, '🔍 *Finding next unsolved challenge...*');
+        const unsolved = await getUnsolvedProblems(1, creds);
+        if (unsolved && unsolved.length > 0) {
+          problem = unsolved[0];
+        } else {
+          await this.sendMessage(chatId, '❌ *Could not find an unsolved challenge.*');
+          return;
         }
       } else {
         problem = await this._resolveProblem(chatId, query, 'solve', { language });
@@ -627,10 +1239,10 @@ Saved LeetCode session credentials have been cleared from the backend database. 
   async _executeSolvePipeline(chatId, problem, language) {
     if (!this.groq || !this.groq.isConfigured) {
       await this.sendMessage(chatId, '❌ *Groq AI key not configured in cloud backend.* Please set GROQ_API_KEY.');
-      return;
+      return { success: false, problem, error: 'Groq not configured' };
     }
 
-    await this.sendMessage(chatId, `🔎 *Problem found:*\n#${problem.frontendId} *${problem.title}*\nDifficulty: *${problem.difficulty}*`);
+    await this.sendMessage(chatId, `🔎 *Problem target:*\n#${problem.frontendId} *${problem.title}*\nDifficulty: *${problem.difficulty}*`);
 
     const details = await getProblemDetails(problem.slug);
     const editorData = await getProblemEditorData(problem.slug);
@@ -656,7 +1268,7 @@ ${solution.code}
 👉 *To enable 24/7 automatic submissions:*
 Click \`/link\` or click **🔗 Sync Account** in Chrome extension settings!`
       );
-      return;
+      return { success: false, problem, error: 'Not authenticated' };
     }
 
     // ── Self-Healing Multi-Attempt Loop ──────────────────────────────────────
@@ -671,7 +1283,7 @@ Click \`/link\` or click **🔗 Sync Account** in Chrome extension settings!`
         const solution = await this.groq.generateSolution(details.title, details.description, language, templateCode);
         if (!solution.isValid || !solution.code) {
           await this.sendMessage(chatId, '❌ *AI generated incomplete code. Aborting submission.*');
-          return;
+          return { success: false, problem, error: 'Incomplete AI code' };
         }
         currentCode = solution.code;
       } else {
@@ -685,7 +1297,7 @@ Click \`/link\` or click **🔗 Sync Account** in Chrome extension settings!`
         );
         if (!refined || !refined.code || !refined.isValid) {
           await this.sendMessage(chatId, '⚠️ *Could not refine solution code further. Stopping attempts.*');
-          break;
+          return { success: false, problem, error: 'Refinement stopped' };
         }
         currentCode = refined.code;
       }
@@ -711,7 +1323,7 @@ ${currentCode}
 \`\`\`
 _Send \`/link\` if you need to refresh your session cookie._`
         );
-        break;
+        return { success: false, problem, error: submitRes.error };
       }
 
       // Poll real verdict from LeetCode judge
@@ -729,20 +1341,28 @@ _Send \`/link\` if you need to refresh your session cookie._`
 ⚡ *Runtime:* ${result.runtime} ${result.runtimePercentile ? `(Beats ${result.runtimePercentile})` : ''}
 💾 *Memory:* ${result.memory} ${result.memoryPercentile ? `(Beats ${result.memoryPercentile})` : ''}`;
 
-        // Optional GitHub Sync
+        // Optional GitHub Sync with dynamic credential check
+        const ghConfig = this.credManager ? this.credManager.getGitHubConfig() : { repo: this.github?.repo || '', token: this.github?.token || '' };
+        if (ghConfig.token && ghConfig.repo && this.github) {
+          this.github.setConfig(ghConfig.token, ghConfig.repo, ghConfig.branch || 'main', ghConfig.folder || 'solutions');
+        }
+
         if (this.github && this.github.isConfigured) {
           try {
+            console.log(`[Bot] Syncing accepted solution to GitHub (${this.github.repo})...`);
             const ghRes = await this.github.syncSolution(details.title, details.difficulty, language, currentCode, details.description);
             if (ghRes.synced) {
+              console.log('[Bot] ✅ GitHub sync successful:', ghRes.commitUrl);
               acceptedText += `\n🐙 *GitHub Sync:* [View Commit](${ghRes.commitUrl})`;
             }
           } catch (ghErr) {
+            console.error('[Bot] ⚠️ GitHub sync failed:', ghErr.message);
             acceptedText += `\n⚠️ *GitHub Sync Failed:* ${ghErr.message}`;
           }
         }
 
         await this.sendMessage(chatId, acceptedText);
-        return;
+        return { success: true, problem, runtime: result.runtime, memory: result.memory };
       }
 
       // Failed verdict - assemble judge feedback for next attempt
@@ -778,9 +1398,10 @@ Final Verdict: *${result.verdict}*`;
         failText += `\n\n*Latest Code Attempt:*\n\`\`\`${targetLangSlug}\n${currentCode}\n\`\`\``;
 
         await this.sendMessage(chatId, failText);
-        break;
+        return { success: false, problem, verdict: result.verdict };
       }
     }
+    return { success: false, problem, error: 'Max attempts reached' };
   }
 
   // ── Problem Resolver ───────────────────────────────────────────────────────
@@ -868,9 +1489,10 @@ Final Verdict: *${result.verdict}*`;
         { command: 'solve', description: 'Solve problem & submit to LeetCode (e.g. /solve 10 cpp)' },
         { command: 'today', description: 'Today\'s challenge & questions solved today' },
         { command: 'timer', description: 'Set daily reminder message timer (e.g. /timer 8 PM)' },
-        { command: 'schedule', description: 'Set auto-solve schedule (e.g. /schedule 10 PM 1)' },
+        { command: 'schedule', description: 'Set auto-solve schedule (e.g. /schedule 10 PM 3 cpp)' },
         { command: 'account', description: 'View linked account & automation status' },
-        { command: 'link', description: 'Link LeetCode account & GitHub repository' },
+        { command: 'link', description: 'Link LeetCode account & Groq API Key' },
+        { command: 'apikey', description: 'Configure or update Groq AI API Key' },
         { command: 'unlink', description: 'Unlink and clear stored credentials' },
         { command: 'help', description: 'Bot manual & instructions' }
       ];

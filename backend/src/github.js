@@ -14,6 +14,13 @@ export class GitHubService {
     return Boolean(this.token && this.repo && this.repo.includes('/'));
   }
 
+  setConfig(token, repo, branch = 'main', folder = 'solutions') {
+    if (token !== undefined && token !== null) this.token = (token || '').trim();
+    if (repo !== undefined && repo !== null) this.repo = (repo || '').trim();
+    if (branch !== undefined && branch !== null) this.branch = (branch || 'main').trim();
+    if (folder !== undefined && folder !== null) this.folder = (folder || 'solutions').trim().replace(/\/$/, '');
+  }
+
   get headers() {
     return {
       Authorization: `token ${this.token}`,

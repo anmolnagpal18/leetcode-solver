@@ -294,7 +294,7 @@ $('btn-sync-cloud-auth').addEventListener('click', async () => {
       const res = await fetch('http://localhost:3000/api/auth/link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session, csrfToken: csrf })
+        body: JSON.stringify({ session, csrfToken: csrf, isManual: true })
       });
 
       const data = await res.json();
@@ -314,6 +314,32 @@ $('btn-sync-cloud-auth').addEventListener('click', async () => {
     }
   });
 });
+
+const unlinkBtn = $('btn-unlink-cloud-auth');
+if (unlinkBtn) {
+  unlinkBtn.addEventListener('click', async () => {
+    unlinkBtn.disabled = true;
+    const el = $('cloud-auth-status');
+    try {
+      showToast('⏳ Unlinking account from Cloud Bot…', 'success', 3000);
+      const res = await fetch('http://localhost:3000/api/auth/unlink', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        showToast('⚪ Account unlinked successfully from Cloud Bot!', 'success');
+        if (el) {
+          el.textContent = '⚪ Not linked to cloud bot';
+          el.style.color = 'var(--text-muted)';
+        }
+      } else {
+        showToast('❌ Failed to unlink account.', 'error');
+      }
+    } catch (e) {
+      showToast(`❌ Cannot connect to Cloud Bot: ${e.message}`, 'error');
+    } finally {
+      unlinkBtn.disabled = false;
+    }
+  });
+}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {

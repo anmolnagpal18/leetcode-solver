@@ -626,10 +626,53 @@
                 <option value="PM">PM</option>
               </select>
             </div>
+
+            <div class="lc-time-picker" style="margin-top: 6px; padding-top: 6px;">
+              <span style="font-size:11px; color:#9094b4;">Questions:</span>
+              <select class="lc-time-select" id="lc-db-questions" style="width: auto; min-width: 130px; text-align: left; margin-left: auto;">
+                <option value="1" selected>1 Question (Daily)</option>
+                <option value="2">2 Questions (Unsolved)</option>
+                <option value="3">3 Questions (Unsolved)</option>
+                <option value="4">4 Questions (Unsolved)</option>
+                <option value="5">5 Questions (Unsolved)</option>
+                <option value="10">10 Questions (Unsolved)</option>
+              </select>
+            </div>
+
+            <div class="lc-time-picker" style="margin-top: 6px; padding-top: 6px;">
+              <span style="font-size:11px; color:#9094b4;">Language:</span>
+              <select class="lc-time-select" id="lc-db-language" style="width: auto; min-width: 130px; text-align: left; margin-left: auto;">
+                <option value="cpp" selected>C++</option>
+                <option value="python3">Python 3</option>
+                <option value="java">Java</option>
+                <option value="javascript">JavaScript</option>
+                <option value="typescript">TypeScript</option>
+                <option value="golang">Go</option>
+                <option value="rust">Rust</option>
+                <option value="csharp">C#</option>
+                <option value="c">C</option>
+              </select>
+            </div>
             
             <div class="lc-action-row" id="lc-db-automation-actions">
               <button class="lc-action-btn primary" id="lc-db-save-time">Save Schedule</button>
               <button class="lc-action-btn secondary" id="lc-db-test-now">Test Trigger</button>
+            </div>
+          </div>
+
+          <!-- Telegram Cloud Bot Access Card -->
+          <div style="margin-top: 4px; margin-bottom: 12px; padding: 10px 12px; background: rgba(34, 158, 217, 0.1); border: 1px solid rgba(34, 158, 217, 0.25); border-radius: 12px; display: flex; align-items: center; gap: 10px;">
+            <div style="width: 28px; height: 28px; border-radius: 8px; background: rgba(34, 158, 217, 0.2); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#229ed9" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </div>
+            <div style="flex: 1;">
+              <div style="font-size: 11.5px; font-weight: 600; color: #fff;">Access Without Laptop</div>
+              <div style="font-size: 10px; color: #9094b4; margin-top: 1px;">
+                Open Telegram bot: <a href="https://t.me/leetcode_solverbot" target="_blank" style="color: #38bdf8; text-decoration: none; font-weight: 600;">@leetcode_solverbot</a>
+              </div>
             </div>
           </div>
         </div>
@@ -736,35 +779,41 @@
     function loadDbStreakSettings() {
       try {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync && chrome.runtime?.id) {
-          chrome.storage.sync.get(['streakProtect', 'streakProtectHour', 'streakProtectMinute', 'streakProtectAmPm'], (data) => {
+          chrome.storage.sync.get(['streakProtect', 'streakProtectHour', 'streakProtectMinute', 'streakProtectAmPm', 'streakProtectQuestions', 'streakProtectLanguage'], (data) => {
             if (chrome.runtime?.lastError) return;
             const isEnabled = data.streakProtect === true;
             const hour = data.streakProtectHour || '10';
             const min  = data.streakProtectMinute !== undefined ? data.streakProtectMinute : '00';
             const ampm = data.streakProtectAmPm  || 'PM';
+            const questions = data.streakProtectQuestions !== undefined ? String(data.streakProtectQuestions) : '1';
+            const language = data.streakProtectLanguage || 'cpp';
             
             const toggleVal = document.getElementById('lc-db-toggle-streak');
             const hourSelect = document.getElementById('lc-db-hour');
-        const minInput = document.getElementById('lc-db-minute');
-        const ampmSelect = document.getElementById('lc-db-ampm');
-        const card = document.getElementById('lc-db-streak-card');
-        const statusText = document.getElementById('lc-db-streak-status');
-        
-        if (toggleVal) toggleVal.checked = isEnabled;
-        if (card) {
-          if (isEnabled) card.classList.add('enabled');
-          else card.classList.remove('enabled');
-        }
-        
-        if (statusText) {
-          statusText.textContent = isEnabled 
-            ? `Auto-solve active at ${hour}:${String(min).padStart(2, '0')} ${ampm}` 
-            : 'Automated protection disabled';
-        }
-        
-        if (hourSelect) hourSelect.value = String(hour).padStart(2, '0');
-        if (minInput) minInput.value = String(min).padStart(2, '0');
-        if (ampmSelect) ampmSelect.value = ampm;
+            const minInput = document.getElementById('lc-db-minute');
+            const ampmSelect = document.getElementById('lc-db-ampm');
+            const qSelect = document.getElementById('lc-db-questions');
+            const langSelect = document.getElementById('lc-db-language');
+            const card = document.getElementById('lc-db-streak-card');
+            const statusText = document.getElementById('lc-db-streak-status');
+            
+            if (toggleVal) toggleVal.checked = isEnabled;
+            if (card) {
+              if (isEnabled) card.classList.add('enabled');
+              else card.classList.remove('enabled');
+            }
+            
+            if (statusText) {
+              statusText.textContent = isEnabled 
+                ? `Auto-solve active at ${hour}:${String(min).padStart(2, '0')} ${ampm} (${questions} Q ${language.toUpperCase()})` 
+                : 'Automated protection disabled';
+            }
+            
+            if (hourSelect) hourSelect.value = String(hour).padStart(2, '0');
+            if (minInput) minInput.value = String(min).padStart(2, '0');
+            if (ampmSelect) ampmSelect.value = ampm;
+            if (qSelect) qSelect.value = questions;
+            if (langSelect) langSelect.value = language;
           });
         }
       } catch (err) {}
@@ -775,11 +824,15 @@
       const hourSelect = document.getElementById('lc-db-hour');
       const minInput = document.getElementById('lc-db-minute');
       const ampmSelect = document.getElementById('lc-db-ampm');
+      const qSelect = document.getElementById('lc-db-questions');
+      const langSelect = document.getElementById('lc-db-language');
       
       const isEnabled = toggleVal ? toggleVal.checked : false;
       const hour = hourSelect ? hourSelect.value : '10';
       let minStr = minInput ? minInput.value.trim() : '00';
       const ampm = ampmSelect ? ampmSelect.value : 'PM';
+      const questions = qSelect ? parseInt(qSelect.value, 10) || 1 : 1;
+      const language = langSelect ? langSelect.value : 'cpp';
       
       let min = parseInt(minStr, 10);
       if (isNaN(min) || min < 0 || min > 59) min = 0;
@@ -792,7 +845,9 @@
             streakProtect: isEnabled,
             streakProtectHour: hour,
             streakProtectMinute: minStr,
-            streakProtectAmPm: ampm
+            streakProtectAmPm: ampm,
+            streakProtectQuestions: questions,
+            streakProtectLanguage: language
           }, () => {
             if (chrome.runtime?.lastError) return;
             chrome.runtime.sendMessage({ type: 'UPDATE_ALARM' }, () => {
@@ -1994,6 +2049,16 @@
       });
     }
 
+    const dbQuestions = document.getElementById('lc-db-questions');
+    if (dbQuestions) {
+      dbQuestions.addEventListener('change', saveDbSchedule);
+    }
+
+    const dbLanguage = document.getElementById('lc-db-language');
+    if (dbLanguage) {
+      dbLanguage.addEventListener('change', saveDbSchedule);
+    }
+
     const dbSaveTime = document.getElementById('lc-db-save-time');
     if (dbSaveTime) {
       dbSaveTime.addEventListener('click', saveDbSchedule);
@@ -2054,7 +2119,7 @@
         chrome.storage.onChanged.addListener((changes, area) => {
           if (chrome.runtime?.lastError) return;
           if (area === 'sync') {
-            if (changes.streakProtect || changes.streakProtectHour || changes.streakProtectMinute || changes.streakProtectAmPm) {
+            if (changes.streakProtect || changes.streakProtectHour || changes.streakProtectMinute || changes.streakProtectAmPm || changes.streakProtectQuestions || changes.streakProtectLanguage) {
               loadDbStreakSettings();
             }
           }
@@ -2086,21 +2151,52 @@
   createSidebar();
   setupListeners();
 
+  function resolveLangDetails(rawLang) {
+    const l = (rawLang || 'cpp').toLowerCase().trim();
+    const map = {
+      'cpp':        { slug: 'cpp',        name: 'C++',        ext: 'cpp' },
+      'c++':        { slug: 'cpp',        name: 'C++',        ext: 'cpp' },
+      'python3':    { slug: 'python3',    name: 'Python 3',   ext: 'py' },
+      'python':     { slug: 'python3',    name: 'Python 3',   ext: 'py' },
+      'py':         { slug: 'python3',    name: 'Python 3',   ext: 'py' },
+      'java':       { slug: 'java',       name: 'Java',       ext: 'java' },
+      'javascript': { slug: 'javascript', name: 'JavaScript', ext: 'js' },
+      'js':         { slug: 'javascript', name: 'JavaScript', ext: 'js' },
+      'typescript': { slug: 'typescript', name: 'TypeScript', ext: 'ts' },
+      'ts':         { slug: 'typescript', name: 'TypeScript', ext: 'ts' },
+      'golang':     { slug: 'golang',     name: 'Go',         ext: 'go' },
+      'go':         { slug: 'golang',     name: 'Go',         ext: 'go' },
+      'rust':       { slug: 'rust',       name: 'Rust',       ext: 'rs' },
+      'rs':         { slug: 'rust',       name: 'Rust',       ext: 'rs' },
+      'csharp':     { slug: 'csharp',     name: 'C#',         ext: 'cs' },
+      'cs':         { slug: 'csharp',     name: 'C#',         ext: 'cs' },
+      'c':          { slug: 'c',          name: 'C',          ext: 'c' }
+    };
+    return map[l] || { slug: 'cpp', name: 'C++', ext: 'cpp' };
+  }
+
   async function runHeadlessSolveOnPage(slug) {
     const statusEl = document.getElementById('lc-db-streak-status');
     try {
       const title = document.querySelector('[class*="text-title-large"]')?.innerText || document.title;
       const description = getDescription();
 
+      const localBgData = await new Promise(resolve => {
+        chrome.storage.local.get(['backgroundSolveLanguage'], resolve);
+      });
+      const syncData = await new Promise(resolve => {
+        chrome.storage.sync.get(['streakProtectLanguage'], resolve);
+      });
+      const chosenLangKey = localBgData?.backgroundSolveLanguage || syncData?.streakProtectLanguage || 'cpp';
+      const langInfo = resolveLangDetails(chosenLangKey);
+
       const snippets = await fetchSnippetsGraphQL(slug);
       let templateCode = '';
-      if (snippets) {
-        const snippet = snippets.find(s => s.langSlug === 'python3');
+      if (snippets && snippets.length > 0) {
+        const snippet = snippets.find(s => s.langSlug === langInfo.slug)
+                     || snippets.find(s => s.langSlug.includes(langInfo.slug))
+                     || snippets[0];
         if (snippet) templateCode = snippet.code;
-      }
-
-      if (!templateCode) {
-        throw new Error('Could not find Python 3 code template.');
       }
 
       const csrfToken = getCookie('csrftoken');
@@ -2123,14 +2219,14 @@
       while (attempt < maxAttempts) {
         attempt++;
         
-        const statusMsg = `Attempt ${attempt}/${maxAttempts}: Solving...`;
+        const statusMsg = `Attempt ${attempt}/${maxAttempts}: Solving (${langInfo.name})...`;
         chrome.storage.local.set({ solveStatus: statusMsg });
         if (statusEl) statusEl.textContent = statusMsg;
 
         // Broadcast current attempt to Telegram status
         chrome.runtime.sendMessage({
           type: 'BACKGROUND_SOLVE_ATTEMPT',
-          payload: { attempt, maxAttempts }
+          payload: { attempt, maxAttempts, language: langInfo.name }
         });
 
         // Request code generation (checks if custom code is present in storage for Attempt 1)
@@ -2146,7 +2242,16 @@
           const response = await new Promise(resolve => {
             chrome.runtime.sendMessage({
               type: 'GENERATE_BACKGROUND_CODE',
-              payload: { title, description, templateCode, attempt, previousFeedback, previousCode }
+              payload: {
+                title,
+                description,
+                templateCode,
+                language: langInfo.name,
+                langSlug: langInfo.slug,
+                attempt,
+                previousFeedback,
+                previousCode
+              }
             }, resolve);
           });
 
@@ -2163,7 +2268,7 @@
 
         previousCode = generatedCode; // Store the code generated in this attempt for subsequent retries
 
-        const submitMsg = `Attempt ${attempt}/${maxAttempts}: Submitting...`;
+        const submitMsg = `Attempt ${attempt}/${maxAttempts}: Submitting ${langInfo.name}...`;
         chrome.storage.local.set({ solveStatus: submitMsg });
         if (statusEl) statusEl.textContent = submitMsg;
 
@@ -2175,7 +2280,7 @@
             'x-csrftoken': csrfToken
           },
           body: JSON.stringify({
-            lang: 'python3',
+            lang: langInfo.slug,
             question_id: questionId,
             typed_code: generatedCode
           })
@@ -2227,6 +2332,7 @@
             payload: {
               title,
               difficulty: getDifficulty(),
+              language: langInfo.ext,
               code: generatedCode,
               slug: slug
             }

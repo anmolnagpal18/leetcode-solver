@@ -1,0 +1,39 @@
+# Environment variables (API keys)
+.env
+.env.local
+.env.*.local
+backend/data/
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node (if ever added)
+node_modules/
+package-lock.json
+
+# Build artifacts
+dist/
+*.zip
+*.crx
+*.pem
+
+# Logs
+*.log
+
+# Scratch folder
+scratch/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+

@@ -304,7 +304,7 @@
             <span class="slider"></span>
           </label>
         </div>
-        <p class="hint" style="margin-top:6px;">Allow background notifications to be sent to your Telegram, and poll for commands (/status, /today, /solution, /solve).</p>
+        <p class="hint" style="margin-top:6px;">Use 24/7 cloud bot <a href="https://t.me/leetcode_solverbot" target="_blank" style="color:var(--accent); font-weight:600;">@leetcode_solverbot</a> to solve & sync autonomously without a laptop.</p>
       </div>
       <div class="form-group">
         <label for="telegram-token">Telegram Bot Token</label>
@@ -335,7 +335,10 @@
               <strong style="font-size:12px; color:var(--text-primary); display:block;">LeetCode Account Link</strong>
               <span style="font-size:10.5px; color:var(--text-muted);" id="cloud-auth-status">Offline / Not synced</span>
             </div>
-            <button class="btn btn-secondary" id="btn-sync-cloud-auth" style="padding:6px 12px; font-size:11px; margin:0; border-color:var(--accent);">🔗 Sync Account</button>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-secondary" id="btn-sync-cloud-auth" style="padding:6px 10px; font-size:11px; margin:0; border-color:var(--accent);">🔗 Sync</button>
+              <button class="btn btn-secondary" id="btn-unlink-cloud-auth" style="padding:6px 10px; font-size:11px; margin:0; border-color:rgba(244,63,94,0.3); color:var(--red);">⚪ Unlink</button>
+            </div>
           </div>
         </div>
       </div>

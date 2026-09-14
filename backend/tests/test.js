@@ -135,6 +135,79 @@ async function runTests() {
   const parsed3 = bot._extractQueryAndLanguage('two-sum');
   assert(parsed3.query === 'two-sum' && parsed3.language === 'Python', 'Defaults language to Python');
 
+  // Test Group 7: Unsolved Problemset & Batching
+  console.log('\n--- Test Group 7: Unsolved Problemset & Batching ---');
+  try {
+    const { getUnsolvedProblems } = await import('../src/leetcode.js');
+    const unsolvedList = await getUnsolvedProblems(3);
+    assert(Array.isArray(unsolvedList) && unsolvedList.length === 3, 'getUnsolvedProblems(3) returns exactly 3 unsolved problems');
+    assert(unsolvedList.every(p => p.slug && p.title && p.frontendId), 'All returned unsolved problems have valid slug, title, frontendId');
+    const uniqueSlugs = new Set(unsolvedList.map(p => p.slug));
+    assert(uniqueSlugs.size === 3, 'All 3 unsolved problems are unique');
+  } catch (e) {
+    assert(false, `getUnsolvedProblems threw error: ${e.message}`);
+  }
+
+  // Test Group 8: Schedule Language & Parameter Parser
+  console.log('\n--- Test Group 8: Schedule Argument & Language Parser ---');
+  const sched1 = bot._parseScheduleArgs('10 PM 3 cpp');
+  assert(sched1.timeStr === '10 PM' && sched1.numQ === 3 && sched1.lang === 'C++', 'Parses "/schedule 10 PM 3 cpp" -> time: 10 PM, count: 3, lang: C++');
+
+  const sched2 = bot._parseScheduleArgs('22:00 2 py');
+  assert(sched2.timeStr === '22:00' && sched2.numQ === 2 && sched2.lang === 'Python', 'Parses "/schedule 22:00 2 py" -> time: 22:00, count: 2, lang: Python');
+
+  const sched3 = bot._parseScheduleArgs('8:30 PM java');
+  assert(sched3.timeStr === '8:30 PM' && sched3.numQ === 1 && sched3.lang === 'Java', 'Parses "/schedule 8:30 PM java" -> time: 8:30 PM, count: 1, lang: Java');
+
+  const sched4 = bot._parseScheduleArgs('3 questions in cpp at 10 PM');
+  assert(sched4.timeStr === '10 PM' && sched4.numQ === 3 && sched4.lang === 'C++', 'Parses natural language schedule string');
+
+  // Test Group 9: Unlink and Credential Lifecycle
+  console.log('\n--- Test Group 9: Unlink & Credential Lifecycle ---');
+  const { CredentialManager } = await import('../src/credentials.js');
+  const pathModule = await import('path');
+  const fsModule = await import('fs');
+  const testCredPath = pathModule.resolve(process.cwd(), 'tests/test-credentials.json');
+  
+  if (fsModule.existsSync(testCredPath)) {
+    fsModule.unlinkSync(testCredPath);
+  }
+
+  const cm = new CredentialManager(testCredPath);
+
+  // Test save credentials
+  cm.saveCredentials('test_session_123', 'test_csrf_456', 'test_user');
+  assert(cm.isConfigured === true, 'CredentialManager.isConfigured is true when session & csrf are present');
+  assert(cm.getCredentials().session === 'test_session_123', 'getCredentials() returns saved session');
+  assert(cm.getCredentials().username === 'test_user', 'getCredentials() returns saved username');
+
+  const testBot = new TelegramBotService({}, { credManager: cm });
+  assert(testBot.isAuthConfigured === true, 'bot.isAuthConfigured is true when credManager has credentials');
+  assert(testBot.authCredentials.session === 'test_session_123', 'bot.authCredentials returns credManager session');
+
+  // Test clearCredentials (unlink)
+  cm.clearCredentials();
+  assert(cm.isConfigured === false, 'CredentialManager.isConfigured is false after clearCredentials()');
+  assert(cm.isExplicitlyUnlinked === true, 'CredentialManager.isExplicitlyUnlinked is true after clearCredentials()');
+  assert(cm.getCredentials().session === '', 'getCredentials().session is empty string after clear');
+  assert(cm.getCredentials().username === null, 'getCredentials().username is null after clear');
+  assert(testBot.isAuthConfigured === false, 'bot.isAuthConfigured is false after clear');
+  assert(testBot.authCredentials.session === '', 'bot.authCredentials.session is empty string after clear');
+
+  // Test GitHub save & clear
+  cm.saveGitHub('ghp_test_token', 'user/test-repo');
+  assert(cm.getGitHubConfig().repo === 'user/test-repo', 'getGitHubConfig() returns saved repo');
+  assert(cm.getGitHubConfig().token === 'ghp_test_token', 'getGitHubConfig() returns saved token');
+
+  cm.clearGitHub();
+  assert(cm.getGitHubConfig().repo === '', 'getGitHubConfig().repo is empty after clearGitHub()');
+  assert(cm.getGitHubConfig().token === '', 'getGitHubConfig().token is empty after clearGitHub()');
+
+  // Clean up isolated test credentials file
+  if (fsModule.existsSync(testCredPath)) {
+    fsModule.unlinkSync(testCredPath);
+  }
+
   console.log(`\n========================================`);
   console.log(`Test Results: ${passed} passed, ${failed} failed.`);
   console.log(`========================================\n`);
@@ -143,3 +216,5 @@ async function runTests() {
 }
 
 runTests();
+
+

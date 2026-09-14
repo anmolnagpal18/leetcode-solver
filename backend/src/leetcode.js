@@ -220,7 +220,14 @@ export async function getProblemEditorData(slug) {
 /**
  * Fetches today's active daily challenge
  */
-export async function getDailyChallenge() {
+export async function getDailyChallenge(credentials = {}) {
+  const { session, csrfToken } = credentials;
+  const headers = {
+    ...DEFAULT_HEADERS,
+    ...(session ? { 'Cookie': `LEETCODE_SESSION=${session}; csrftoken=${csrfToken || ''};` } : {}),
+    ...(csrfToken ? { 'x-csrftoken': csrfToken } : {})
+  };
+
   const graphqlQuery = `
     query questionOfToday {
       activeDailyCodingChallengeQuestion {
@@ -242,7 +249,7 @@ export async function getDailyChallenge() {
 
   const res = await fetch(GRAPHQL_URL, {
     method: 'POST',
-    headers: DEFAULT_HEADERS,
+    headers,
     body: JSON.stringify({ query: graphqlQuery })
   });
 
@@ -652,4 +659,146 @@ export async function getUserTodaySolveStats(username, session = '', csrfToken =
     return { count: 0, questions: [] };
   }
 }
+
+/**
+ * Fetches N strictly unsolved, uncompleted problems for the user.
+ * 1. Checks user's recent AC submissions list to ensure zero duplication.
+ * 2. Checks today's Daily Challenge; if unsolved, includes it as problem #1.
+ * 3. Fetches problems from problemset with status NOT_STARTED and isPaidOnly=false.
+ * 4. Strictly excludes all problems ever solved or submitted with AC.
+ * 5. Returns array of N problem objects: [{ slug, title, frontendId, difficulty, isDaily }]
+ */
+export async function getUnsolvedProblems(count = 1, credentials = {}) {
+  const targetCount = Math.max(1, parseInt(count || 1, 10));
+  const { session, csrfToken, username } = credentials;
+  const authHeaders = {
+    ...DEFAULT_HEADERS,
+    ...(session ? { 'Cookie': `LEETCODE_SESSION=${session}; csrftoken=${csrfToken || ''};` } : {}),
+    ...(csrfToken ? { 'x-csrftoken': csrfToken } : {})
+  };
+
+  const solvedSlugs = new Set();
+
+  // 1. Fetch recent AC submissions for the user if username is available
+  if (username) {
+    try {
+      const acRes = await fetch(GRAPHQL_URL, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          query: `query recentAcSubmissions($username: String!) {
+            recentAcSubmissionList(username: $username, limit: 100) {
+              titleSlug
+            }
+          }`,
+          variables: { username }
+        })
+      });
+      if (acRes.ok) {
+        const acData = await acRes.json();
+        const list = acData.data?.recentAcSubmissionList || [];
+        for (const s of list) {
+          if (s.titleSlug) solvedSlugs.add(s.titleSlug.toLowerCase());
+        }
+      }
+    } catch (err) {
+      console.warn('[LeetCode] getUnsolvedProblems: recentAcSubmissions warning:', err.message);
+    }
+  }
+
+  const result = [];
+  const pickedSlugs = new Set();
+
+  // 2. Check Daily Challenge
+  try {
+    const daily = await getDailyChallenge(credentials);
+    const isDailySolved = (daily.userStatus === 'Finish') || (daily.titleSlug && solvedSlugs.has(daily.titleSlug.toLowerCase()));
+
+    if (!isDailySolved && daily.titleSlug) {
+      result.push({
+        slug: daily.titleSlug,
+        title: daily.title,
+        frontendId: daily.frontendId,
+        difficulty: daily.difficulty,
+        isDaily: true
+      });
+      pickedSlugs.add(daily.titleSlug.toLowerCase());
+    } else if (daily?.title) {
+      console.log(`[LeetCode] Today's Daily Challenge (#${daily.frontendId} ${daily.title}) is ALREADY SOLVED. Skipping it.`);
+    }
+  } catch (err) {
+    console.warn('[LeetCode] getUnsolvedProblems: Daily challenge check warning:', err.message);
+  }
+
+  // 3. If more problems needed, fetch from problemset with NOT_STARTED filter
+  let skip = 0;
+  const limit = 50;
+
+  while (result.length < targetCount && skip < 500) {
+    try {
+      const psRes = await fetch(GRAPHQL_URL, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          query: `query problemsetQuestionList($categorySlug: String, $limit: Int, $skip: Int, $filters: QuestionListFilterInput) {
+            problemsetQuestionList: questionList(
+              categorySlug: $categorySlug
+              limit: $limit
+              skip: $skip
+              filters: $filters
+            ) {
+              total: totalNum
+              questions: data {
+                frontendQuestionId: questionFrontendId
+                title
+                titleSlug
+                difficulty
+                status
+                paidOnly: isPaidOnly
+              }
+            }
+          }`,
+          variables: {
+            categorySlug: '',
+            limit,
+            skip,
+            filters: { status: 'NOT_STARTED' }
+          }
+        })
+      });
+
+      if (!psRes.ok) break;
+      const psData = await psRes.json();
+      const questions = psData.data?.problemsetQuestionList?.questions || [];
+      if (questions.length === 0) break;
+
+      for (const q of questions) {
+        if (result.length >= targetCount) break;
+        if (q.paidOnly) continue; // Skip LeetCode Premium questions
+
+        const slugKey = (q.titleSlug || '').toLowerCase();
+        if (!slugKey || pickedSlugs.has(slugKey) || solvedSlugs.has(slugKey) || q.status === 'ac') {
+          continue;
+        }
+
+        result.push({
+          slug: q.titleSlug,
+          title: q.title,
+          frontendId: q.frontendQuestionId,
+          difficulty: q.difficulty,
+          isDaily: false
+        });
+        pickedSlugs.add(slugKey);
+      }
+
+      skip += limit;
+    } catch (err) {
+      console.warn('[LeetCode] getUnsolvedProblems: Problemset batch warning:', err.message);
+      break;
+    }
+  }
+
+  return result;
+}
+
 

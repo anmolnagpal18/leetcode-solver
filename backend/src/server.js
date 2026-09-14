@@ -24,9 +24,9 @@ const GITHUB_FOLDER = process.env.GITHUB_FOLDER || 'solutions';
 const TELEGRAM_MODE = (process.env.TELEGRAM_MODE || 'polling').toLowerCase();
 const AUTO_SOLVE_DAILY = process.env.AUTO_SOLVE_DAILY === 'true';
 
-// Initialize services
 const credManager = new CredentialManager();
-const groq = new GroqService(GROQ_API_KEY);
+const initialGroqKey = credManager.getGroqApiKey() || GROQ_API_KEY;
+const groq = new GroqService(initialGroqKey);
 const github = new GitHubService(GITHUB_TOKEN, GITHUB_REPO, GITHUB_BRANCH, GITHUB_FOLDER);
 
 const bot = new TelegramBotService(
@@ -40,6 +40,7 @@ const bot = new TelegramBotService(
 );
 
 const scheduler = new DailyScheduler(bot, credManager, { autoSolveDaily: AUTO_SOLVE_DAILY });
+bot.scheduler = scheduler;
 
 // Lightweight HTTP Request Handler
 const server = http.createServer(async (req, res) => {
@@ -145,16 +146,24 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Auth Link API (1-Click Link from Extension or Telegram)
+  // Auth Link API (1-Click Link from Extension Settings or Telegram)
   if (url.pathname === '/api/auth/link' && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {
       try {
-        const { session, csrfToken } = JSON.parse(body || '{}');
+        const { session, csrfToken, isManual } = JSON.parse(body || '{}');
         if (!session || !csrfToken) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: false, error: 'session and csrfToken are required' }));
+          return;
+        }
+
+        // Only allow manual user actions (1-Click Sync button in Chrome extension settings or Telegram /link)
+        if (!isManual) {
+          console.log('[Server] 🔒 Automatic background link request rejected. Use 1-Click Sync in Extension settings or Telegram /link.');
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, ignored: true, message: 'Only manual linking requests are accepted.' }));
           return;
         }
 

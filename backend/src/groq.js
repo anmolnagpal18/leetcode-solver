@@ -22,6 +22,11 @@ export class GroqService {
     return Boolean(this.apiKey && this.apiKey.startsWith('gsk_'));
   }
 
+  setApiKey(apiKey) {
+    this.apiKey = (apiKey || '').trim();
+    this.activeModel = null;
+  }
+
   async _fetchChat(model, messages, maxTokens = 2000, temperature = 0.2) {
     const res = await fetch(`${GROQ_BASE}/chat/completions`, {
       method: 'POST',

@@ -77,45 +77,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-// ── Automatic Cloud Bot Sync ──────────────────────────────────────────────────
-async function autoSyncLeetCodeSessionToCloud() {
-  try {
-    chrome.cookies.getAll({ domain: 'leetcode.com' }, async (cookies) => {
-      if (!cookies || cookies.length === 0) return;
-      const session = cookies.find(c => c.name === 'LEETCODE_SESSION')?.value;
-      const csrf = cookies.find(c => c.name === 'csrftoken')?.value;
-      if (session && csrf) {
-        try {
-          const res = await fetch('http://localhost:3000/api/auth/link', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ session, csrfToken: csrf })
-          });
-          const data = await res.json();
-          if (res.ok && data.success) {
-            console.log('[LC-Companion SW] 🟢 Automatically synced LeetCode session to 24/7 Cloud Bot for @' + data.username);
-          }
-        } catch (_) {}
-      }
-    });
-  } catch (_) {}
-}
-
-// Trigger auto-sync on worker wake
-autoSyncLeetCodeSessionToCloud();
-if (chrome.cookies && chrome.cookies.onChanged) {
-  chrome.cookies.onChanged.addListener(changeInfo => {
-    if (changeInfo.cookie?.domain?.includes('leetcode.com') && changeInfo.cookie?.name === 'LEETCODE_SESSION') {
-      autoSyncLeetCodeSessionToCloud();
-    }
-  });
-}
-
 // ── Alarm Handler ─────────────────────────────────────────────────────────────
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === 'streak-protection-alarm') {
     checkStreakProtection();
-    autoSyncLeetCodeSessionToCloud();
     // Keep Telegram updates polling active
     startTelegramLongPoll();
   }
@@ -691,37 +656,21 @@ async function checkStreakProtection() {
     console.log(`[LC-Companion SW] Streak Protection: lastAutoSolvedDate: ${localData.lastAutoSolvedDate}, localDate: ${today}`);
 
     if (localData.lastAutoSolvedDate === today) {
-      console.log('[LC-Companion SW] Streak Protection: Daily challenge already auto-solved today.');
+      console.log('[LC-Companion SW] Streak Protection: Already auto-solved today.');
       return;
     }
 
-    // Check if daily challenge has already been solved today
-    console.log('[LC-Companion SW] Fetching daily challenge user status from LeetCode...');
-    const daily = await fetchDailyChallenge();
-    if (!daily) {
-      console.warn('[LC-Companion SW] Failed to fetch daily challenge from LeetCode. Retrying on next alarm.');
-      return;
-    }
+    const qCount = parseInt(settings.streakProtectQuestions, 10) || 1;
+    const lang = settings.streakProtectLanguage || 'cpp';
 
-    console.log(`[LC-Companion SW] Daily Challenge: "${daily.title}", User Status: "${daily.userStatus}"`);
-
-    if (daily.userStatus === 'Finish') {
-      console.log('[LC-Companion SW] Streak Protection: User already finished the daily challenge manually. Marking solved.');
-      await new Promise(resolve => {
-        chrome.storage.local.set({ lastAutoSolvedDate: today }, resolve);
-      });
-      return;
-    }
-
-    // Unsolved daily challenge! Run headless background solver instead of opening intrusive browser tabs
-    console.log('[LC-Companion SW] Streak protection triggered! Solving daily challenge in background:', daily.titleSlug);
-    await solveDailyChallengeInBackground();
+    console.log(`[LC-Companion SW] Streak protection triggered for ${qCount} question(s) in ${lang}...`);
+    await solveConfiguredScheduleInBackground(qCount, lang);
   } catch (err) {
     console.warn('[LC-Companion SW] checkStreakProtection warning:', err);
   }
 }
 
-// ── Daily Challenge Fetcher ──────────────────────────────────────────────────
+// ── Daily Challenge & Problemset Fetchers ─────────────────────────────────────
 async function fetchDailyChallenge() {
   try {
     const res = await fetch('https://leetcode.com/graphql', {
@@ -733,6 +682,7 @@ async function fetchDailyChallenge() {
           activeDailyCodingChallengeQuestion {
             userStatus
             question {
+              frontendQuestionId: questionFrontendId
               titleSlug
               title
               difficulty
@@ -747,6 +697,7 @@ async function fetchDailyChallenge() {
     if (!challenge) return null;
     return {
       userStatus: challenge.userStatus,
+      frontendId: challenge.question.frontendQuestionId,
       titleSlug:  challenge.question.titleSlug,
       title:      challenge.question.title,
       difficulty: challenge.question.difficulty
@@ -755,6 +706,99 @@ async function fetchDailyChallenge() {
     console.warn('[LC-Companion SW] fetchDailyChallenge warning (likely offline/network error):', err);
     return null;
   }
+}
+
+async function fetchUnsolvedProblems(targetCount = 1) {
+  const result = [];
+  const pickedSlugs = new Set();
+
+  // 1. Check Daily Challenge first
+  try {
+    const daily = await fetchDailyChallenge();
+    if (daily && daily.userStatus !== 'Finish' && daily.titleSlug) {
+      result.push({
+        titleSlug: daily.titleSlug,
+        title: daily.title,
+        frontendId: daily.frontendId,
+        difficulty: daily.difficulty,
+        isDaily: true
+      });
+      pickedSlugs.add(daily.titleSlug.toLowerCase());
+    }
+  } catch (err) {
+    console.warn('[LC-Companion SW] fetchDailyChallenge in unsolved fetcher warning:', err);
+  }
+
+  // 2. Fetch additional unsolved problems from problemset if needed
+  let skip = 0;
+  const limit = 50;
+
+  while (result.length < targetCount && skip < 500) {
+    try {
+      const res = await fetch('https://leetcode.com/graphql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          query: `query problemsetQuestionList($categorySlug: String, $limit: Int, $skip: Int, $filters: QuestionListFilterInput) {
+            problemsetQuestionList: questionList(
+              categorySlug: $categorySlug
+              limit: $limit
+              skip: $skip
+              filters: $filters
+            ) {
+              total: totalNum
+              questions: data {
+                frontendQuestionId: questionFrontendId
+                title
+                titleSlug
+                difficulty
+                status
+                paidOnly: isPaidOnly
+              }
+            }
+          }`,
+          variables: {
+            categorySlug: '',
+            limit,
+            skip,
+            filters: { status: 'NOT_STARTED' }
+          }
+        })
+      });
+
+      if (!res.ok) break;
+      const data = await res.json();
+      const questions = data.data?.problemsetQuestionList?.questions || [];
+      if (questions.length === 0) break;
+
+      for (const q of questions) {
+        if (result.length >= targetCount) break;
+        if (q.paidOnly) continue; // Skip Premium questions
+
+        const slugKey = (q.titleSlug || '').toLowerCase();
+        if (!slugKey || pickedSlugs.has(slugKey) || q.status === 'ac') {
+          continue;
+        }
+
+        result.push({
+          titleSlug: q.titleSlug,
+          title: q.title,
+          frontendId: q.frontendQuestionId,
+          difficulty: q.difficulty,
+          isDaily: false
+        });
+        pickedSlugs.add(slugKey);
+      }
+
+      skip += limit;
+    } catch (err) {
+      console.warn('[LC-Companion SW] fetchUnsolvedProblems batch error:', err);
+      break;
+    }
+  }
+
+  return result;
 }
 
 async function searchLeetCodeProblem(query) {
@@ -1180,49 +1224,149 @@ async function fetchQuestionSnippets(slug) {
 }
 
 let isBackgroundSolveInProgress = false;
+let currentProblemResolver = null;
 
-async function solveProblemInBackground(specificSlug = null, specificTitle = null) {
+function getLanguageInfo(lang) {
+  const l = (lang || 'cpp').toLowerCase().trim();
+  const map = {
+    'cpp':        { slug: 'cpp',        name: 'C++',        ext: 'cpp' },
+    'c++':        { slug: 'cpp',        name: 'C++',        ext: 'cpp' },
+    'python3':    { slug: 'python3',    name: 'Python 3',   ext: 'py' },
+    'python':     { slug: 'python3',    name: 'Python 3',   ext: 'py' },
+    'py':         { slug: 'python3',    name: 'Python 3',   ext: 'py' },
+    'java':       { slug: 'java',       name: 'Java',       ext: 'java' },
+    'javascript': { slug: 'javascript', name: 'JavaScript', ext: 'js' },
+    'js':         { slug: 'javascript', name: 'JavaScript', ext: 'js' },
+    'typescript': { slug: 'typescript', name: 'TypeScript', ext: 'ts' },
+    'ts':         { slug: 'typescript', name: 'TypeScript', ext: 'ts' },
+    'golang':     { slug: 'golang',     name: 'Go',         ext: 'go' },
+    'go':         { slug: 'golang',     name: 'Go',         ext: 'go' },
+    'rust':       { slug: 'rust',       name: 'Rust',       ext: 'rs' },
+    'rs':         { slug: 'rust',       name: 'Rust',       ext: 'rs' },
+    'csharp':     { slug: 'csharp',     name: 'C#',         ext: 'cs' },
+    'cs':         { slug: 'csharp',     name: 'C#',         ext: 'cs' },
+    'c':          { slug: 'c',          name: 'C',          ext: 'c' }
+  };
+  return map[l] || { slug: 'cpp', name: 'C++', ext: 'cpp' };
+}
+
+async function solveConfiguredScheduleInBackground(targetCount = null, targetLang = null) {
   if (isBackgroundSolveInProgress) {
     console.log('[LC-Companion SW] Background solve already in progress. Ignoring duplicate trigger.');
     return;
   }
   isBackgroundSolveInProgress = true;
 
-  let slug = specificSlug;
-  let title = specificTitle;
+  try {
+    const settings = await StorageService.getSettings();
+    const count = targetCount || parseInt(settings.streakProtectQuestions, 10) || 1;
+    const langKey = targetLang || settings.streakProtectLanguage || 'cpp';
+    const langInfo = getLanguageInfo(langKey);
 
-  if (!slug) {
-    await sendTelegramMessage('*Starting background Auto-Solver for today\'s challenge...*');
-    const daily = await fetchDailyChallenge();
-    if (!daily) {
-      await sendTelegramMessage('*Failed to fetch today\'s challenge.*');
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const date = String(now.getDate()).padStart(2, '0');
+    const today = `${year}-${month}-${date}`;
+
+    await chrome.storage.local.set({ solveStatus: `🔍 Finding ${count} unsolved challenge(s)...` });
+
+    const unsolvedProblems = await fetchUnsolvedProblems(count);
+
+    if (!unsolvedProblems || unsolvedProblems.length === 0) {
+      await chrome.storage.local.set({ solveStatus: '✅ All target problems already solved!' });
+      await chrome.storage.local.set({ lastAutoSolvedDate: today });
+      setTimeout(() => {
+        chrome.storage.local.remove(['solveStatus']);
+      }, 5000);
       isBackgroundSolveInProgress = false;
       return;
     }
 
-    if (daily.userStatus === 'Finish') {
-      await sendTelegramMessage('✅ *Today\'s challenge is already solved!* Streak is safe.');
-      isBackgroundSolveInProgress = false;
-      return;
+    let solvedCount = 0;
+    for (let i = 0; i < unsolvedProblems.length; i++) {
+      const prob = unsolvedProblems[i];
+      const probTitle = prob.title || prob.titleSlug;
+      const progressText = `[${i + 1}/${unsolvedProblems.length}] Solving "${probTitle}" (${langInfo.name})...`;
+
+      await chrome.storage.local.set({ solveStatus: progressText });
+      console.log(`[LC-Companion SW] ${progressText}`);
+
+      const outcome = await new Promise(resolve => {
+        currentProblemResolver = resolve;
+        chrome.tabs.create({
+          url: `https://leetcode.com/problems/${prob.titleSlug}/?backgroundSolve=true`,
+          active: false
+        }, tab => {
+          chrome.storage.local.set({
+            backgroundSolveSlug: prob.titleSlug,
+            backgroundSolveTabId: tab.id,
+            backgroundSolveLanguage: langInfo.slug
+          });
+        });
+      });
+
+      if (outcome && outcome.success) {
+        solvedCount++;
+      }
+
+      if (i < unsolvedProblems.length - 1) {
+        await chrome.storage.local.set({ solveStatus: `[${i + 1}/${unsolvedProblems.length}] Solved! Next challenge in 4s...` });
+        await new Promise(r => setTimeout(r, 4000));
+      }
     }
-    slug = daily.titleSlug;
-    title = daily.title;
-  } else {
-    await sendTelegramMessage(`*Starting background Auto-Solver for ${title || slug}...*`);
+
+    await chrome.storage.local.set({ lastAutoSolvedDate: today });
+    const finishMsg = `🎉 Solved ${solvedCount}/${unsolvedProblems.length} problem(s) in ${langInfo.name}!`;
+    await chrome.storage.local.set({ solveStatus: finishMsg });
+
+    setTimeout(() => {
+      chrome.storage.local.remove(['solveStatus']);
+    }, 7000);
+
+    isBackgroundSolveInProgress = false;
+  } catch (err) {
+    console.warn('[LC-Companion SW] solveConfiguredScheduleInBackground error:', err);
+    await chrome.storage.local.set({ solveStatus: `Error: ${err.message}` });
+    setTimeout(() => {
+      chrome.storage.local.remove(['solveStatus']);
+    }, 5000);
+    isBackgroundSolveInProgress = false;
+  }
+}
+
+async function solveDailyChallengeInBackground() {
+  const settings = await StorageService.getSettings();
+  const count = parseInt(settings.streakProtectQuestions, 10) || 1;
+  const lang = settings.streakProtectLanguage || 'cpp';
+  return solveConfiguredScheduleInBackground(count, lang);
+}
+
+async function solveProblemInBackground(specificSlug = null, specificTitle = null) {
+  if (isBackgroundSolveInProgress) {
+    console.log('[LC-Companion SW] Background solve already in progress. Ignoring duplicate trigger.');
+    return;
   }
 
-  await sendTelegramMessage('*Initiating headless solver via background tab...*');
+  if (specificSlug) {
+    isBackgroundSolveInProgress = true;
+    const settings = await StorageService.getSettings();
+    const langKey = settings.streakProtectLanguage || 'cpp';
+    const langInfo = getLanguageInfo(langKey);
 
-  // Open the tab in the background (active: false) with a specific query flag
-  chrome.tabs.create({
-    url: `https://leetcode.com/problems/${slug}/?backgroundSolve=true`,
-    active: false
-  }, tab => {
-    chrome.storage.local.set({ 
-      backgroundSolveSlug: slug, 
-      backgroundSolveTabId: tab.id 
+    chrome.tabs.create({
+      url: `https://leetcode.com/problems/${specificSlug}/?backgroundSolve=true`,
+      active: false
+    }, tab => {
+      chrome.storage.local.set({
+        backgroundSolveSlug: specificSlug,
+        backgroundSolveTabId: tab.id,
+        backgroundSolveLanguage: langInfo.slug
+      });
     });
-  });
+  } else {
+    await solveDailyChallengeInBackground();
+  }
 }
 
 async function handleGenerateBackgroundCode(payload, sendResponse) {
@@ -1233,7 +1377,7 @@ async function handleGenerateBackgroundCode(payload, sendResponse) {
     }
 
     const grok = new GrokAPI(settings.grokApiKey);
-    const lang = payload.language || 'Python 3';
+    const lang = payload.language || 'C++';
     const messages = [
       {
         role: 'system',
@@ -1252,15 +1396,15 @@ ${payload.templateCode ? `You MUST write your solution inside this exact class/m
 Description:
 ${payload.description}
 
-Here is your PREVIOUS Python code submission:
-\`\`\`python
+Here is your PREVIOUS ${lang} code submission:
+\`\`\`
 ${payload.previousCode}
 \`\`\`
 
 NOTE: The above code failed LeetCode verification with the following error/verdict:
 ${payload.previousFeedback}
 
-Please analyze this failed code and the error details carefully. Find the logical bug, edge-case failure, or missing optimization. Correct the code to resolve the issue, and return only the raw corrected python3 code block. Keep the exact class/method structure.`
+Please analyze this failed code and the error details carefully. Find the logical bug, edge-case failure, or missing optimization. Correct the code to resolve the issue, and return only the raw corrected ${lang} code block. Keep the exact class/method structure.`
       });
     } else {
       messages.push({
@@ -1269,7 +1413,7 @@ Please analyze this failed code and the error details carefully. Find the logica
       });
     }
 
-    const codeResponse = await grok.generateChat(messages, { maxTokens: 1500, temperature: 0.2 });
+    const codeResponse = await grok.generateChat(messages, { maxTokens: 2500, temperature: 0.2 });
     const normalized = (codeResponse || '').replace(/\r\n/g, '\n');
     const match = normalized.match(/```(?:[a-zA-Z0-9_#+.-]*)[^\n]*\n([\s\S]*?)```/) || normalized.match(/```([\s\S]*?)```/);
     const generatedCode = match ? match[1].trim() : normalized.trim();
@@ -1281,7 +1425,7 @@ Please analyze this failed code and the error details carefully. Find the logica
 }
 
 async function handleBackgroundSolveAttempt(payload, sendResponse) {
-  await sendTelegramMessage(`*Solving daily challenge (Attempt ${payload.attempt}/${payload.maxAttempts})...*`);
+  await sendTelegramMessage(`*Solving challenge (Attempt ${payload.attempt}/${payload.maxAttempts})...*`);
   if (sendResponse) sendResponse({ success: true });
 }
 
@@ -1294,43 +1438,59 @@ async function handleBackgroundSolveAccepted(payload, sendResponse) {
     const date = String(now.getDate()).padStart(2, '0');
     const today = `${year}-${month}-${date}`;
 
-    await new Promise(resolve => {
-      chrome.storage.local.set({ lastAutoSolvedDate: today }, resolve);
-    });
-
     await handleAcceptedSubmission({
       title: payload.title,
       difficulty: payload.difficulty,
-      language: 'py',
+      language: payload.language || 'cpp',
       code: payload.code,
       slug: payload.slug
     }, () => {});
 
-    isBackgroundSolveInProgress = false; // Reset background solve flag
+    // Close background solve tab
+    chrome.storage.local.get(['backgroundSolveTabId'], data => {
+      if (data.backgroundSolveTabId) {
+        chrome.tabs.remove(data.backgroundSolveTabId, () => {
+          chrome.storage.local.remove(['backgroundSolveTabId']);
+        });
+      }
+    });
+
+    if (currentProblemResolver) {
+      const fn = currentProblemResolver;
+      currentProblemResolver = null;
+      fn({ success: true, payload });
+    }
+
     if (sendResponse) sendResponse({ success: true });
   } catch (err) {
     console.warn('[LC-Companion SW] handleBackgroundSolveAccepted error:', err);
-    isBackgroundSolveInProgress = false;
+    if (currentProblemResolver) {
+      const fn = currentProblemResolver;
+      currentProblemResolver = null;
+      fn({ success: false, error: err.message });
+    }
     if (sendResponse) sendResponse({ success: false, error: err.message });
   }
 }
 
 async function handleBackgroundSolveFailed(payload, sendResponse) {
   await sendTelegramMessage(`*Background solver failed:* ${payload.error}`);
-  
-  // Set lastAutoSolvedDate to today to prevent spamming LeetCode (protect account from block)
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const date = String(now.getDate()).padStart(2, '0');
-  const today = `${year}-${month}-${date}`;
-  
-  await new Promise(resolve => {
-    chrome.storage.local.set({ lastAutoSolvedDate: today }, resolve);
+
+  // Close background solve tab
+  chrome.storage.local.get(['backgroundSolveTabId'], data => {
+    if (data.backgroundSolveTabId) {
+      chrome.tabs.remove(data.backgroundSolveTabId, () => {
+        chrome.storage.local.remove(['backgroundSolveTabId']);
+      });
+    }
   });
-  
-  await sendTelegramMessage('*Auto-solver paused for today to prevent LeetCode spam block.*');
-  isBackgroundSolveInProgress = false; // Reset background solve flag
+
+  if (currentProblemResolver) {
+    const fn = currentProblemResolver;
+    currentProblemResolver = null;
+    fn({ success: false, error: payload.error });
+  }
+
   if (sendResponse) sendResponse({ success: true });
 }
 
@@ -1339,12 +1499,19 @@ async function handleCloseBackgroundTab(sendResponse) {
     if (data.backgroundSolveTabId) {
       chrome.tabs.remove(data.backgroundSolveTabId, () => {
         chrome.storage.local.remove(['backgroundSolveTabId']);
-        isBackgroundSolveInProgress = false; // Reset background solve flag
-        chrome.storage.local.remove(['solveStatus']);
+        if (currentProblemResolver) {
+          const fn = currentProblemResolver;
+          currentProblemResolver = null;
+          fn({ success: false, error: 'Tab closed' });
+        }
         if (sendResponse) sendResponse({ success: true });
       });
     } else {
-      isBackgroundSolveInProgress = false;
+      if (currentProblemResolver) {
+        const fn = currentProblemResolver;
+        currentProblemResolver = null;
+        fn({ success: false, error: 'Tab not found' });
+      }
       if (sendResponse) sendResponse({ success: false });
     }
   });
@@ -1355,9 +1522,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   chrome.storage.local.get(['backgroundSolveTabId'], data => {
     if (data.backgroundSolveTabId === tabId) {
       chrome.storage.local.remove(['backgroundSolveTabId']);
-      isBackgroundSolveInProgress = false;
-      chrome.storage.local.remove(['solveStatus']);
-      console.log('[LC-Companion SW] Background solve tab closed. Reset progress state.');
+      if (currentProblemResolver) {
+        const fn = currentProblemResolver;
+        currentProblemResolver = null;
+        fn({ success: false, error: 'Tab removed' });
+      }
+      console.log('[LC-Companion SW] Background solve tab closed.');
     }
   });
 });
@@ -1440,7 +1610,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
     if (changes.telegramEnabled || changes.telegramBotToken || changes.telegramChatId) {
       initTelegramPolling();
     }
-    if (changes.streakProtect || changes.streakProtectHour || changes.streakProtectMinute || changes.streakProtectAmPm) {
+    if (changes.streakProtect || changes.streakProtectHour || changes.streakProtectMinute || changes.streakProtectAmPm || changes.streakProtectQuestions || changes.streakProtectLanguage) {
       // Clear lastAutoSolvedDate so the user can test the trigger immediately!
       chrome.storage.local.remove(['lastAutoSolvedDate'], () => {
         console.log('[LC-Companion SW] Cleared lastAutoSolvedDate to enable immediate trigger testing.');
